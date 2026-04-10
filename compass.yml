@@ -1,0 +1,16 @@
+name: rpi-quantum-hackathon-2026
+id: ari:cloud:compass:8526d2ba-687c-46b3-8b65-acaf550a9b39:component/141c5c30-d6a4-4eb9-b8dd-1a0c55663014/2283770b-23e1-42df-9227-5f5a2a8c93f7
+description: null
+configVersion: 1
+typeId: SERVICE
+fields:
+  tier: 4
+links:
+  - name: null
+    type: REPOSITORY
+    url: https://github.com/qBraid/rpi-quantum-hackathon-2026
+relationships:
+  DEPENDS_ON: []
+labels:
+  - source:github
+customFields: null
