@@ -54,6 +54,9 @@ The workload should be an **algorithm**, not just a simple state-preparation dem
 - Variational observable estimation
 - Bernstein-Vazirani or Deutsch-Jozsa, if extended into a meaningful benchmark study
 
+### _Great_ example
+- Cutting edge quantum algorithms with few tutorials and your own personal twist / optimization
+
 ### Not sufficient by itself
 - Bell-state generation
 - GHZ-only preparation
