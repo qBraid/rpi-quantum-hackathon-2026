@@ -127,7 +127,7 @@ Report at least **two** compiled-resource metrics, such as:
 ---
 
 ## Deliverables
-Each team must submit:
+Each team must submit via PR:
 
 ### 1. Code Repository
 A GitHub repository containing:
@@ -145,7 +145,7 @@ Your repository README must include:
 - a conclusion about the best tradeoff between quality and cost
 
 ### 3. Demo
-A short presentation or live demo explaining:
+A short presentation or demo recording explaining:
 - what you built
 - how qBraid was used
 - what you learned from the benchmark
