@@ -220,17 +220,9 @@ class QiskitExecutor(Executor):
         num_parameters = int(qc_optimized.num_parameters)
         initial_params = rng.random(num_parameters)
 
-        cobyla_miniter = num_parameters + 2
-        cobyla_maxiter = max(self.maxiter, cobyla_miniter)
-        if cobyla_maxiter != self.maxiter:
-            logger.info(
-                "Adjusted COBYLA maxiter from %s to %s for %s parameters",
-                self.maxiter,
-                cobyla_maxiter,
-                num_parameters,
-            )
+        optimizer = problem.optimizer_config(num_parameters=num_parameters, maxiter=self.maxiter)
+        logger.info("Optimize on %s using %s", runtime.label, optimizer.method)
 
-        logger.info("Optimize on %s", runtime.label)
         start_optimization = time()
         objective: Callable[..., Any] = loss_func
         minimize_fn: Callable[..., Any] = cast(Any, minimize)
@@ -238,11 +230,13 @@ class QiskitExecutor(Executor):
         result = minimize_fn(
             fun=cast(Any, objective),
             x0=cast(Any, initial_params),
-            method="COBYLA",
-            options={"maxiter": cobyla_maxiter},
+            method=optimizer.method,
+            options=optimizer.options,
         )
         optimization_time = time() - start_optimization
         logger.info("Optimization %.4fs", optimization_time)
+        logger.info("Optimizer method=%s options=%s", optimizer.method, optimizer.options)
+        logger.info("Optimized parameters %s", problem.describe_parameters(np.asarray(result.x)))
 
         postprocess = problem.postprocess(
             problem_data=problem_data, experiment_results=experiment_results
@@ -282,6 +276,8 @@ class QiskitExecutor(Executor):
             "problem_setup_time": problem_data.setup_time,
             "circuit_time": circuit_time,
             "optimization_time": optimization_time,
+            "optimizer_method": optimizer.method,
+            "optimizer_options": dict(optimizer.options),
             "primary_metric_name": primary_metric_name,
             "primary_metric_value": primary_metric_value,
             "cut_size": postprocess.get("cut_size"),

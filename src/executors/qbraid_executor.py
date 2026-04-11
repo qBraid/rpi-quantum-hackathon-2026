@@ -3,7 +3,7 @@ import logging
 import os
 from pathlib import Path
 from time import sleep, time
-from typing import Any, Callable, Self, cast
+from typing import Any, Callable, Iterable, Self, cast
 
 import numpy as np
 from dotenv import load_dotenv
@@ -321,10 +321,13 @@ class QBraidExecutor(Executor):
                 (ansatz, observables[2], transformed),
             ]
             result = run_with_retry(pubs)
+            if result is None:
+                raise RuntimeError("Estimator returned no result payload.")
+            result_iter = cast(Iterable[Any], result)
 
             node_exp_map = {}
             idx = 0
-            for entry in result:
+            for entry in result_iter:
                 for ev in entry.data.evs:
                     node_exp_map[idx] = ev
                     idx += 1
@@ -472,14 +475,19 @@ class QBraidExecutor(Executor):
         rng = np.random.default_rng(seed)
         num_parameters = int(compiled.num_parameters)
         initial_params = rng.random(num_parameters)
-        maxiter = max(self.maxiter, num_parameters + 2)
+        optimizer = problem.optimizer_config(num_parameters=num_parameters, maxiter=self.maxiter)
+        logger.info("Optimize using %s options=%s", optimizer.method, optimizer.options)
 
         minimize_fn: Callable[..., Any] = cast(Any, minimize)
-        _ = minimize_fn(
+        optimization_result = minimize_fn(
             fun=cast(Any, objective),
             x0=cast(Any, initial_params),
-            method="COBYLA",
-            options={"maxiter": maxiter},
+            method=optimizer.method,
+            options=optimizer.options,
+        )
+        logger.info(
+            "Optimized parameters %s",
+            problem.describe_parameters(np.asarray(optimization_result.x)),
         )
 
         postprocess = problem.postprocess(
@@ -533,6 +541,9 @@ class QBraidExecutor(Executor):
             "qbraid_shots": self.qbraid_shots if environment.name == "cloud" else None,
             "primary_metric_name": primary_metric_name,
             "primary_metric_value": primary_metric_value,
+            "optimizer_method": optimizer.method,
+            "optimizer_options": dict(optimizer.options),
+            "optimization_result": optimization_result,
             "final_loss": final_loss,
             "cut_size": cut_size,
             "quality_score": quality_score,
