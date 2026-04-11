@@ -20,7 +20,7 @@ class SpsaOptimizer(Optimizer):
         parser.add_argument(
             "--spsa-maxiter",
             type=int,
-            default=40,
+            default=20,
             help="Maximum SPSA iterations.",
         )
         parser.add_argument(

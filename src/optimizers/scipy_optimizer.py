@@ -55,12 +55,8 @@ class ScipyOptimizer(Optimizer):
         return {"maxiter": budget}
 
     def planned_evaluations(self, *, num_parameters: int) -> int | None:
-        floor = max(1, num_parameters + 2)
-        if self.method == "nelder-mead":
-            return max(self.maxiter, num_parameters * 8, floor)
-        if self.method == "powell":
-            return max(self.maxiter, num_parameters * 6, floor)
-        return max(self.maxiter, floor)
+        _ = num_parameters
+        return max(1, self.maxiter)
 
     def optimize(self, objective: ObjectiveFn, initial_params: np.ndarray) -> OptimizerResult:
         method_map = {
@@ -69,7 +65,7 @@ class ScipyOptimizer(Optimizer):
             "powell": "Powell",
         }
         scipy_method = method_map[self.method]
-        budget = self.planned_evaluations(num_parameters=len(initial_params)) or self.maxiter
+        budget = max(1, self.maxiter)
 
         options: dict[str, Any]
         if scipy_method == "Nelder-Mead":
