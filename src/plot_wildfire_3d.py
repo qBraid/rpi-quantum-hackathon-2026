@@ -21,9 +21,9 @@ def build_parser() -> argparse.ArgumentParser:
             / "assets"
             / "kenney_nature-kit"
             / "Models"
-            / "OBJ format"
+            / "GLTF format"
         ),
-        help="Path to Kenney OBJ assets directory.",
+        help="Path to Kenney GLB assets directory.",
     )
     parser.add_argument(
         "--save-image",

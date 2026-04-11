@@ -9,9 +9,9 @@ import pyvista as pv
 
 
 TREE_MODEL_NAMES = (
-    "tree_default.obj",
-    "tree_oak.obj",
-    "tree_pineTallA.obj",
+    "tree_default.glb",
+    "tree_oak.glb",
+    "tree_pineTallA.glb",
 )
 
 
@@ -23,7 +23,7 @@ def _resolve_assets_dir(assets_dir: str | Path | None) -> Path:
         / "assets"
         / "kenney_nature-kit"
         / "Models"
-        / "OBJ format"
+        / "GLTF format"
     )
 
 
@@ -35,52 +35,78 @@ def _as_polydata(mesh: pv.DataSet) -> pv.PolyData:
     return mesh.extract_surface().triangulate()
 
 
-def _load_obj_diffuse_color(obj_path: Path) -> tuple[float, float, float] | None:
-    mtl_path = obj_path.with_suffix(".mtl")
-    if not mtl_path.exists():
+def _iter_polydata_blocks(dataset: pv.DataSet) -> list[pv.PolyData]:
+    if isinstance(dataset, pv.MultiBlock):
+        blocks: list[pv.PolyData] = []
+        for block in dataset:
+            if block is None:
+                continue
+            blocks.extend(_iter_polydata_blocks(block))
+        return blocks
+    return [_as_polydata(dataset)]
+
+
+def _extract_base_color(mesh: pv.PolyData) -> tuple[float, float, float] | None:
+    if "BaseColorMultiplier" not in mesh.field_data:
         return None
-
-    for raw_line in mtl_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("Kd "):
-            parts = line.split()
-            if len(parts) >= 4:
-                try:
-                    r = float(parts[1])
-                    g = float(parts[2])
-                    b = float(parts[3])
-                except ValueError:
-                    return None
-                return (float(np.clip(r, 0.0, 1.0)), float(np.clip(g, 0.0, 1.0)), float(np.clip(b, 0.0, 1.0)))
-    return None
+    rgba = np.asarray(mesh.field_data["BaseColorMultiplier"]).reshape(-1)
+    if rgba.size < 3:
+        return None
+    return (float(np.clip(rgba[0], 0.0, 1.0)), float(np.clip(rgba[1], 0.0, 1.0)), float(np.clip(rgba[2], 0.0, 1.0)))
 
 
-def _load_tree_meshes(assets_dir: Path) -> list[tuple[pv.PolyData, tuple[float, float, float] | None]]:
-    meshes: list[tuple[pv.PolyData, tuple[float, float, float] | None]] = []
+def _load_tree_meshes(assets_dir: Path) -> list[list[tuple[pv.PolyData, tuple[float, float, float] | None]]]:
+    model_meshes: list[list[tuple[pv.PolyData, tuple[float, float, float] | None]]] = []
     for name in TREE_MODEL_NAMES:
-        obj_path = assets_dir / name
-        mesh = _as_polydata(pv.read(obj_path))
-        # Kenney OBJ assets are often authored with Y-up; rotate so tree height aligns with Z-up.
-        x_span = mesh.bounds[1] - mesh.bounds[0]
-        y_span = mesh.bounds[3] - mesh.bounds[2]
-        z_span = mesh.bounds[5] - mesh.bounds[4]
-        dominant_axis = int(np.argmax([x_span, y_span, z_span]))
-        if dominant_axis == 0:
-            mesh = mesh.rotate_y(90.0, inplace=False)
-        elif dominant_axis == 1:
-            mesh = mesh.rotate_x(90.0, inplace=False)
+        model_path = assets_dir / name
+        parts = _iter_polydata_blocks(pv.read(model_path))
+        if not parts:
+            continue
 
-        bounds = mesh.bounds
+        combined = parts[0].copy(deep=True)
+        for part in parts[1:]:
+            combined = combined.merge(part)
+
+        # GLB trees are authored with Y-up; rotate to Z-up so trees stand vertically on each tile.
+        x_span = combined.bounds[1] - combined.bounds[0]
+        y_span = combined.bounds[3] - combined.bounds[2]
+        z_span = combined.bounds[5] - combined.bounds[4]
+        dominant_axis = int(np.argmax([x_span, y_span, z_span]))
+        x_rot = 0.0
+        y_rot = 0.0
+        if dominant_axis == 0:
+            y_rot = 90.0
+        elif dominant_axis == 1:
+            x_rot = 90.0
+
+        rotated_parts: list[tuple[pv.PolyData, tuple[float, float, float] | None]] = []
+        for part in parts:
+            transformed = part
+            if x_rot:
+                transformed = transformed.rotate_x(x_rot, inplace=False)
+            if y_rot:
+                transformed = transformed.rotate_y(y_rot, inplace=False)
+            rotated_parts.append((transformed, _extract_base_color(part)))
+
+        rotated_combined = rotated_parts[0][0].copy(deep=True)
+        for part_mesh, _ in rotated_parts[1:]:
+            rotated_combined = rotated_combined.merge(part_mesh)
+
+        bounds = rotated_combined.bounds
         cx = 0.5 * (bounds[0] + bounds[1])
         cy = 0.5 * (bounds[2] + bounds[3])
         min_z = bounds[4]
-        mesh = mesh.translate((-cx, -cy, -min_z), inplace=False)
-        z_span = max(mesh.bounds[5] - mesh.bounds[4], 1e-6)
-        mesh = mesh.scale(0.85 / z_span, inplace=False)
-        meshes.append((mesh, _load_obj_diffuse_color(obj_path)))
-    return meshes
+        normalized_height = max(bounds[5] - bounds[4], 1e-6)
+        scale = 0.85 / normalized_height
+
+        normalized_parts: list[tuple[pv.PolyData, tuple[float, float, float] | None]] = []
+        for part_mesh, part_color in rotated_parts:
+            transformed = part_mesh.translate((-cx, -cy, -min_z), inplace=False)
+            transformed = transformed.scale(scale, inplace=False)
+            normalized_parts.append((transformed, part_color))
+
+        model_meshes.append(normalized_parts)
+    return model_meshes
 
 
 def show_wildfire_result_3d(
@@ -123,6 +149,8 @@ def show_wildfire_result_3d(
 
     assets_path = _resolve_assets_dir(assets_dir)
     tree_meshes = _load_tree_meshes(assets_path)
+    if not tree_meshes:
+        raise ValueError(f"No GLB tree models found in: {assets_path}")
 
     seen: set[tuple[int, int]] = set()
     for idx, cell in enumerate(selected_cells):
@@ -134,21 +162,23 @@ def show_wildfire_result_3d(
             continue
         seen.add((r, c))
 
-        base_tree, tree_color = tree_meshes[idx % len(tree_meshes)]
-        tree = base_tree.copy(deep=True)
-        tree = tree.rotate_z(float((idx * 47) % 360), inplace=False)
+        tree_parts = tree_meshes[idx % len(tree_meshes)]
+        rotation = float((idx * 47) % 360)
         z_offset = 0.08 + 0.07 * float(np.clip(fuel_map[r, c], 0.0, 1.0))
-        tree = tree.translate((float(c), float(rows - 1 - r), z_offset), inplace=False)
+        for base_part, part_color in tree_parts:
+            tree = base_part.copy(deep=True)
+            tree = tree.rotate_z(rotation, inplace=False)
+            tree = tree.translate((float(c), float(rows - 1 - r), z_offset), inplace=False)
 
-        add_kwargs: dict[str, Any] = {
-            "smooth_shading": True,
-            "ambient": 0.2,
-            "diffuse": 0.75,
-            "specular": 0.12,
-        }
-        if tree_color is not None:
-            add_kwargs["color"] = tree_color
-        plotter.add_mesh(tree, **add_kwargs)
+            add_kwargs: dict[str, Any] = {
+                "smooth_shading": True,
+                "ambient": 0.2,
+                "diffuse": 0.75,
+                "specular": 0.12,
+            }
+            if part_color is not None:
+                add_kwargs["color"] = part_color
+            plotter.add_mesh(tree, **add_kwargs)
 
     # Add subtle grid accents so each shrub marker sits on a visibly distinct tile.
     for r in range(rows + 1):

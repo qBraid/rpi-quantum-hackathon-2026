@@ -44,6 +44,11 @@ def show_wildfire_result(postprocess: dict[str, Any], *, title: str, block: bool
         ax.set_yticklabels([str(row) for row in range(num_rows)])
         ax.set_xlim(-0.5, num_cols - 0.5)
         ax.set_ylim(num_rows - 0.5, -0.5)
+        # Draw visible tile borders using minor-grid ticks aligned to cell edges.
+        ax.set_xticks(np.arange(-0.5, num_cols, 1.0), minor=True)
+        ax.set_yticks(np.arange(-0.5, num_rows, 1.0), minor=True)
+        ax.grid(which="minor", color="white", linestyle="-", linewidth=0.8, alpha=0.35)
+        ax.tick_params(which="minor", bottom=False, left=False)
 
     fire_break = postprocess.get("fire_break_score")
     fire_break_str = (

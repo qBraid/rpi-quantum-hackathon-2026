@@ -111,7 +111,7 @@ uv run python src/main.py --executor qbraid --qbraid-environment cloud --qbraid-
 
 ### Artistic 3D shrub placement plot (PyVista + Matplotlib)
 
-Render an artistic 3D tile map and place shrubs as three rotating tree models from `assets/kenney_nature-kit`:
+Render an artistic 3D tile map and place shrubs as three rotating GLB tree models from `assets/kenney_nature-kit/Models/GLTF format`:
 
 ```bash
 uv run python src/plot_wildfire_3d.py --grid-rows 10 --grid-cols 10 --shrub-budget 10
