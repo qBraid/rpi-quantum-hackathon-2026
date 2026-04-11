@@ -1,0 +1,14 @@
+{
+  "name": "marketmind-q-observatory-deck",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build-deck.mjs"
+  },
+  "dependencies": {
+    "papaparse": "^5.5.3",
+    "pptxgenjs": "^4.0.1"
+  },
+  "devDependencies": {}
+}

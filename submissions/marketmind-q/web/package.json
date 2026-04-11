@@ -1,0 +1,26 @@
+{
+  "name": "marketmind-q-observatory",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run sync-data && vite --host 127.0.0.1",
+    "build": "npm run sync-data && tsc -b && vite build",
+    "preview": "npm run sync-data && vite preview --host 127.0.0.1",
+    "sync-data": "node scripts/sync-data.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.0.4",
+    "papaparse": "^5.5.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "recharts": "^3.2.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10"
+  },
+  "devDependencies": {
+    "@types/papaparse": "^5.3.16",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2"
+  }
+}
