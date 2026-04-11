@@ -78,6 +78,10 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Local files that should not be committed
+apikey.json
+*.mp4
+
 # IPython
 profile_default/
 ipython_config.py
