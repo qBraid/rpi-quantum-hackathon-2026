@@ -11,80 +11,151 @@ from problems.base import ParameterEvaluator, Problem
 from .model import WildfireModel, WildfireProblemData
 
 
-def _build_layer_optimized_wildfire_ansatz(
-    *,
-    grid_size: tuple[int, int],
-    gamma: ParameterVector,
-    beta: ParameterVector,
+def _build_grid_quantum_circuit(
+    gamma: list[Any],
+    beta: list[Any],
+    max_active: int = 10,
+    grid_size: tuple[int, int] = (10, 10),
 ) -> QuantumCircuit:
-    rows, cols = grid_size
-    num_qubits = rows * cols
+    num_qubits = grid_size[0] * grid_size[1]
     qc = QuantumCircuit(num_qubits)
+    qc.x(range(max_active))
 
     for gamma_i, beta_i in zip(gamma, beta):
-        for row in range(rows):
-            for col in range(cols - 1):
-                idx = row * cols + col
-                qc.rz(-gamma_i, idx)
-                qc.rz(-gamma_i, idx + 1)
-                qc.cx(idx, idx + 1)
-                qc.rz(gamma_i, idx + 1)
-                qc.cx(idx, idx + 1)
+        vertical_odd = QuantumCircuit(num_qubits)
+        vertical_even = QuantumCircuit(num_qubits)
 
+        vertical_odd.rz(0 - gamma_i, range(num_qubits))
+        vertical_even.rz(0 - gamma_i, range(num_qubits))
+
+        for i in range(grid_size[0]):
+            for j in range(grid_size[1] - 1):
+                idx = i * grid_size[1] + j
+
+                if j % 2 == 0:
+                    vertical_odd.cx(idx, idx + 1)
+                    vertical_odd.rz(gamma_i, idx + 1)
+                    vertical_odd.cx(idx, idx + 1)
+                else:
+                    vertical_even.cx(idx, idx + 1)
+                    vertical_even.rz(gamma_i, idx + 1)
+                    vertical_even.cx(idx, idx + 1)
+
+        qc.compose(vertical_odd, inplace=True)
+        qc.barrier()
+        qc.compose(vertical_even, inplace=True)
         qc.barrier()
 
-        for row in range(rows - 1):
-            for col in range(cols):
-                idx = row * cols + col
-                qc.rz(-gamma_i, idx)
-                qc.rz(-gamma_i, idx + cols)
-                qc.cx(idx, idx + cols)
-                qc.rz(gamma_i, idx + cols)
-                qc.cx(idx, idx + cols)
+        horizontal_odd = QuantumCircuit(num_qubits)
+        horizontal_even = QuantumCircuit(num_qubits)
+        horizontal_odd.rz(0 - gamma_i, range(num_qubits))
+        horizontal_even.rz(0 - gamma_i, range(num_qubits))
+        for i in range(grid_size[0] - 1):
+            for j in range(grid_size[1]):
+                idx = i * grid_size[1] + j
 
+                if i % 2 == 0:
+                    horizontal_odd.cx(idx, idx + grid_size[1])
+                    horizontal_odd.rz(gamma_i, idx + grid_size[1])
+                    horizontal_odd.cx(idx, idx + grid_size[1])
+                else:
+                    horizontal_even.cx(idx, idx + grid_size[1])
+                    horizontal_even.rz(gamma_i, idx + grid_size[1])
+                    horizontal_even.cx(idx, idx + grid_size[1])
+
+        qc.compose(horizontal_odd, inplace=True)
         qc.barrier()
+        qc.compose(horizontal_even, inplace=True)
+        qc.barrier()
+
         qc.h(range(num_qubits))
 
-        for row in range(rows):
-            for col in range(cols - 1):
-                idx = row * cols + col
-                qc.cx(idx, idx + 1)
-                qc.rz(2 * beta_i, idx + 1)
-                qc.cx(idx, idx + 1)
+        vertical_odd = QuantumCircuit(num_qubits)
+        vertical_even = QuantumCircuit(num_qubits)
+        for i in range(grid_size[0]):
+            for j in range(grid_size[1] - 1):
+                idx = i * grid_size[1] + j
 
+                if j % 2 == 0:
+                    vertical_odd.cx(idx, idx + 1)
+                    vertical_odd.rz(2 * beta_i, idx + 1)
+                    vertical_odd.cx(idx, idx + 1)
+                else:
+                    vertical_even.cx(idx, idx + 1)
+                    vertical_even.rz(2 * beta_i, idx + 1)
+                    vertical_even.cx(idx, idx + 1)
+
+        qc.compose(vertical_odd, inplace=True)
+        qc.barrier()
+        qc.compose(vertical_even, inplace=True)
         qc.barrier()
 
-        for row in range(rows - 1):
-            for col in range(cols):
-                idx = row * cols + col
-                qc.cx(idx, idx + cols)
-                qc.rz(2 * beta_i, idx + cols)
-                qc.cx(idx, idx + cols)
+        horizontal_odd = QuantumCircuit(num_qubits)
+        horizontal_even = QuantumCircuit(num_qubits)
+        for i in range(grid_size[0] - 1):
+            for j in range(grid_size[1]):
+                idx = i * grid_size[1] + j
 
+                if i % 2 == 0:
+                    horizontal_odd.cx(idx, idx + grid_size[1])
+                    horizontal_odd.rz(2 * beta_i, idx + grid_size[1])
+                    horizontal_odd.cx(idx, idx + grid_size[1])
+                else:
+                    horizontal_even.cx(idx, idx + grid_size[1])
+                    horizontal_even.rz(2 * beta_i, idx + grid_size[1])
+                    horizontal_even.cx(idx, idx + grid_size[1])
+
+        qc.compose(horizontal_odd, inplace=True)
         qc.barrier()
+        qc.compose(horizontal_even, inplace=True)
+        qc.barrier()
+
         qc.h(range(num_qubits))
         qc.s(range(num_qubits))
         qc.h(range(num_qubits))
 
-        for row in range(rows):
-            for col in range(cols - 1):
-                idx = row * cols + col
-                qc.cx(idx, idx + 1)
-                qc.rz(2 * beta_i, idx + 1)
-                qc.cx(idx, idx + 1)
+        vertical_odd = QuantumCircuit(num_qubits)
+        vertical_even = QuantumCircuit(num_qubits)
+        for i in range(grid_size[0]):
+            for j in range(grid_size[1] - 1):
+                idx = i * grid_size[1] + j
 
+                if j % 2 == 0:
+                    vertical_odd.cx(idx, idx + 1)
+                    vertical_odd.rz(2 * beta_i, idx + 1)
+                    vertical_odd.cx(idx, idx + 1)
+                else:
+                    vertical_even.cx(idx, idx + 1)
+                    vertical_even.rz(2 * beta_i, idx + 1)
+                    vertical_even.cx(idx, idx + 1)
+
+        qc.compose(vertical_odd, inplace=True)
+        qc.barrier()
+        qc.compose(vertical_even, inplace=True)
         qc.barrier()
 
-        for row in range(rows - 1):
-            for col in range(cols):
-                idx = row * cols + col
-                qc.cx(idx, idx + cols)
-                qc.rz(2 * beta_i, idx + cols)
-                qc.cx(idx, idx + cols)
+        horizontal_odd = QuantumCircuit(num_qubits)
+        horizontal_even = QuantumCircuit(num_qubits)
+        for i in range(grid_size[0] - 1):
+            for j in range(grid_size[1]):
+                idx = i * grid_size[1] + j
 
+                if i % 2 == 0:
+                    horizontal_odd.cx(idx, idx + grid_size[1])
+                    horizontal_odd.rz(2 * beta_i, idx + grid_size[1])
+                    horizontal_odd.cx(idx, idx + grid_size[1])
+                else:
+                    horizontal_even.cx(idx, idx + grid_size[1])
+                    horizontal_even.rz(2 * beta_i, idx + grid_size[1])
+                    horizontal_even.cx(idx, idx + grid_size[1])
+
+        qc.compose(horizontal_odd, inplace=True)
         qc.barrier()
-        qc.sdg(range(num_qubits))
+        qc.compose(horizontal_even, inplace=True)
+        qc.barrier()
+
         qc.h(range(num_qubits))
+        qc.sdg(range(num_qubits))
 
     return qc
 
@@ -158,13 +229,16 @@ class WildfireMitigationProblem(Problem):
         )
 
     def build_ansatz(self, *, logger: logging.Logger) -> QuantumCircuit:
-        logger.info("Building layer-optimized wildfire circuit")
+        logger.info("Building wildfire circuit via GridQuantumCircuit")
         gamma = ParameterVector("gamma", self.reps)
         beta = ParameterVector("beta", self.reps)
-        qc = _build_layer_optimized_wildfire_ansatz(
+        num_qubits = self.grid_rows * self.grid_cols
+        max_active = max(0, min(self.shrub_budget, num_qubits))
+        qc = _build_grid_quantum_circuit(
+            gamma=list(gamma),
+            beta=list(beta),
             grid_size=(self.grid_rows, self.grid_cols),
-            gamma=gamma,
-            beta=beta,
+            max_active=max_active,
         )
         logger.info(
             "Circuit qubits=%s params=%s depth=%s",

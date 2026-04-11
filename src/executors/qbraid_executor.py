@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import logging
 import os
 from pathlib import Path
-from time import time
+from time import sleep, time
 from typing import Any, Callable, Self, cast
 
 import numpy as np
@@ -12,6 +12,7 @@ from qiskit_aer import AerSimulator
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from qiskit_ibm_runtime import QiskitRuntimeService
+from qiskit_ibm_runtime.exceptions import RuntimeJobFailureError
 from scipy.optimize import minimize
 
 from executors.base import Executor, get_executor_logger
@@ -44,6 +45,9 @@ class RuntimeMetrics:
 
 @dataclass(frozen=True)
 class QBraidExecutor(Executor):
+    _RESULT_RETRY_ATTEMPTS = 3
+    _RESULT_RETRY_BASE_DELAY_SECONDS = 2.0
+
     backend_name: str
     maxiter: int
     strategy: str
@@ -274,7 +278,41 @@ class QBraidExecutor(Executor):
         ansatz,
         observables: list[list[Any]],
         parameter_transform: Callable[[np.ndarray], np.ndarray],
+        logger: logging.Logger,
     ) -> ParameterEvaluator:
+        def is_retryable_runtime_error(exc: Exception) -> bool:
+            if isinstance(exc, RuntimeJobFailureError):
+                message = str(exc).lower()
+                return "error code 8057" in message or "control instrument error" in message
+
+            exc_name = exc.__class__.__name__.lower()
+            if "timeout" in exc_name:
+                return True
+
+            message = str(exc).lower()
+            return "timed out" in message or "temporar" in message
+
+        def run_with_retry(pubs: list[tuple[Any, list[Any], np.ndarray]]):
+            attempts = QBraidExecutor._RESULT_RETRY_ATTEMPTS
+            for attempt in range(1, attempts + 1):
+                try:
+                    job = estimator.run(pubs)  # type: ignore[arg-type]
+                    return job.result()
+                except Exception as exc:
+                    if attempt >= attempts or not is_retryable_runtime_error(exc):
+                        raise
+
+                    delay = QBraidExecutor._RESULT_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Estimator job failed with retryable runtime error (%s). "
+                        "Retrying in %.1fs (%d/%d)",
+                        exc,
+                        delay,
+                        attempt,
+                        attempts,
+                    )
+                    sleep(delay)
+
         def evaluate(params: np.ndarray) -> dict[int, float]:
             transformed = parameter_transform(np.asarray(params, dtype=float))
             pubs = [
@@ -282,8 +320,7 @@ class QBraidExecutor(Executor):
                 (ansatz, observables[1], transformed),
                 (ansatz, observables[2], transformed),
             ]
-            job = estimator.run(pubs)  # type: ignore[arg-type]
-            result = job.result()
+            result = run_with_retry(pubs)
 
             node_exp_map = {}
             idx = 0
@@ -420,6 +457,7 @@ class QBraidExecutor(Executor):
                 ansatz=compiled,
                 observables=observables,
                 parameter_transform=environment.parameter_transform,
+                logger=logger,
             )
         loss_func = problem.make_loss(
             problem_data=problem_data,

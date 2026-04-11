@@ -136,13 +136,35 @@ def _build_executor_runs(args: argparse.Namespace) -> list[ExecutorRun]:
 
 def _select_best_result(results: list[dict[str, Any]]) -> dict[str, Any]:
     def key(item: dict[str, Any]) -> tuple[float, float]:
+        primary_metric_value = item.get("primary_metric_value")
+        primary_score = (
+            float(primary_metric_value)
+            if isinstance(primary_metric_value, (int, float))
+            else float("-inf")
+        )
         cut_size = item.get("cut_size")
-        cut_score = float(cut_size) if isinstance(cut_size, int) else float("-inf")
+        cut_score = float(cut_size) if isinstance(cut_size, (int, float)) else float("-inf")
         final_loss = item.get("final_loss")
         loss_score = -float(final_loss) if isinstance(final_loss, (int, float)) else float("-inf")
-        return (cut_score, loss_score)
+        return (primary_score if primary_score != float("-inf") else cut_score, loss_score)
 
     return max(results, key=key)
+
+
+def _format_primary_metric(item: dict[str, Any]) -> tuple[str, Any]:
+    metric_name = item.get("primary_metric_name")
+    metric_value = item.get("primary_metric_value")
+    if metric_name is not None and metric_value is not None:
+        return str(metric_name), metric_value
+
+    if "cut_size" in item:
+        return "cut_size", item.get("cut_size")
+    if "fire_break_score" in item:
+        return "fire_break_score", item.get("fire_break_score")
+    if "quality_score" in item:
+        return "quality_score", item.get("quality_score")
+
+    return "metric", item.get("final_loss")
 
 
 def _select_best_benchmark_result(
@@ -193,14 +215,16 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     print("COMBINATION SUMMARY")
     print("=" * 70)
     for item in all_results:
+        metric_name, metric_value = _format_primary_metric(item)
         print(
-            f"{item.get('combination')}: cut={item.get('cut_size')} "
+            f"{item.get('combination')}: {metric_name}={metric_value} "
             f"loss={item.get('final_loss')} topics={item.get('benchmark_topics')}"
         )
+    best_metric_name, best_metric_value = _format_primary_metric(best_result)
     print(
         "Best result: "
         f"{best_result.get('combination')} "
-        f"(run={best_result.get('run_label')})"
+        f"(run={best_result.get('run_label')}, {best_metric_name}={best_metric_value})"
     )
     print("=" * 70)
 
