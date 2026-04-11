@@ -22,10 +22,12 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 import argparse
+import threading
 from typing import Any, Callable
 
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
+from matplotlib.widgets import Button
 import numpy as np
 
 from executors import QBraidExecutor
@@ -118,7 +120,9 @@ _FALLBACK    = ["#00d4ff", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"
 
 
 def _run_key(r: dict) -> str:
-    return f"{r.get('strategy','?')}/{r.get('environment','?')}"
+    env = r.get("environment", "?")
+    tag = " \u2605" if env in ("hardware", "cloud") else ""  # ★ for real QPU runs
+    return f"{r.get('strategy', '?')}/{env}{tag}"
 
 
 def _run_color(r: dict, idx: int) -> str:
@@ -159,9 +163,31 @@ class _Dashboard:
         self._cur_loss: list[float] = []
         self._cur_label: str = ""
 
+        # QPU thread-safety state
+        self._lock = threading.Lock()
+        self._pending_qpu: list[dict] = []
+        self._qpu_run_config: dict | None = None
+
+        # Fixed outer margins so the QPU button row fits below the grid
+        self.fig.subplots_adjust(top=0.92, bottom=0.10, left=0.07, right=0.97)
         plt.ion()
-        plt.tight_layout()
         plt.pause(0.05)
+
+        # ── QPU hardware button ───────────────────────────────────────────────
+        self._ax_btn = self.fig.add_axes([0.35, 0.015, 0.30, 0.050])
+        self._btn_qpu = Button(
+            self._ax_btn, "▶  Run on QPU  (real hardware)",
+            color="#1a2035", hovercolor="#2d3a52",
+        )
+        self._btn_qpu.label.set_color("#e2e8f0")
+        self._btn_qpu.label.set_fontsize(9)
+        self._btn_qpu.label.set_fontweight("bold")
+        self._btn_qpu.on_clicked(self._on_qpu_click)
+
+        # Timer: drain QPU thread updates safely on the GUI thread every 200 ms
+        self._qpu_timer = self.fig.canvas.new_timer(interval=200)
+        self._qpu_timer.add_callback(self._poll_qpu_data)
+        self._qpu_timer.start()
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -185,6 +211,118 @@ class _Dashboard:
         self._cur_label = ""
         self._draw()
 
+    # ── QPU public API ────────────────────────────────────────────────────────
+
+    def setup_qpu(
+        self,
+        problem: Problem,
+        optimizer,
+        backend: str,
+        shots: int,
+        strategies: list[str],
+    ) -> None:
+        """Wires up QPU run parameters so the button can trigger a hardware run."""
+        self._qpu_run_config = dict(
+            problem=problem,
+            optimizer=optimizer,
+            backend=backend,
+            shots=shots,
+            strategies=strategies,
+        )
+
+    def _on_qpu_click(self, _event) -> None:
+        if self._qpu_run_config is None:
+            return
+        if getattr(self, "_qpu_thread", None) and self._qpu_thread.is_alive():
+            return
+        self._btn_qpu.label.set_text("⏳  Running on QPU hardware…")
+        self._btn_qpu.color = "#2d1800"
+        self.fig.canvas.draw_idle()
+        self._qpu_thread = threading.Thread(target=self._qpu_run_bg, daemon=True)
+        self._qpu_thread.start()
+
+    def _qpu_run_bg(self) -> None:
+        """Background thread: run each strategy on hardware; push updates to _pending_qpu."""
+        cfg = self._qpu_run_config
+        for strategy in cfg["strategies"]:
+            label = f"{strategy}/hardware"
+            with self._lock:
+                self._pending_qpu.append({"type": "label", "label": label})
+            try:
+                loss_buf: list[float] = []
+
+                def on_iter(
+                    loss: float,
+                    _buf: list = loss_buf,
+                    _lbl: str = label,
+                ) -> None:
+                    _buf.append(loss)
+                    with self._lock:
+                        self._pending_qpu.append(
+                            {"type": "iteration", "loss": loss, "label": _lbl}
+                        )
+
+                executor = QBraidExecutor(
+                    backend_name=cfg["backend"],
+                    strategy=strategy,
+                    environment="hardware",
+                    qbraid_shots=cfg["shots"],
+                )
+                live = _LiveProblem(cfg["problem"], on_iteration=on_iter)
+                result = executor.execute(live, optimizer=cfg["optimizer"])
+                result["combination"] = label
+                if not result.get("loss_history"):
+                    result["loss_history"] = list(loss_buf)
+                with self._lock:
+                    self._pending_qpu.append({"type": "result", "result": result})
+            except Exception as exc:  # noqa: BLE001
+                with self._lock:
+                    self._pending_qpu.append(
+                        {"type": "error", "label": label, "msg": str(exc)}
+                    )
+
+        with self._lock:
+            self._pending_qpu.append({"type": "done"})
+
+    def _poll_qpu_data(self) -> None:
+        """Timer callback (main thread, 200 ms): drain pending QPU data and redraw."""
+        with self._lock:
+            items, self._pending_qpu = list(self._pending_qpu), []
+
+        if not items:
+            return
+
+        changed = False
+        for item in items:
+            t = item["type"]
+            if t == "label":
+                self._cur_label = item["label"]
+                self._cur_loss = []
+                changed = True
+            elif t == "iteration":
+                self._cur_loss.append(item["loss"])
+                changed = True
+            elif t == "result":
+                r = item["result"]
+                if not r.get("loss_history"):
+                    r["loss_history"] = list(self._cur_loss)
+                self._results.append(r)
+                self._cur_loss = []
+                self._cur_label = ""
+                changed = True
+            elif t == "error":
+                print(f"\n[QPU Error] {item['label']}: {item['msg']}")
+                print("[QPU] Make sure IBM Quantum credentials are saved via QiskitRuntimeService.save_account().")
+                self._cur_label = ""
+                changed = True
+            elif t == "done":
+                self._btn_qpu.label.set_text("✓  QPU run complete — results added to charts")
+                self._btn_qpu.color = "#0d2b1a"
+                changed = True
+
+        if changed:
+            self._draw(_pause=False)
+
     def finalize(self) -> None:
         plt.ioff()
         end_title = self._TITLE + "\n— benchmark complete —"
@@ -197,7 +335,7 @@ class _Dashboard:
 
     # ── internal draw ─────────────────────────────────────────────────────────
 
-    def _draw(self) -> None:
+    def _draw(self, *, _pause: bool = True) -> None:
         rs = self._results
         cl = self._cur_loss
         lb = self._cur_label
@@ -323,7 +461,8 @@ class _Dashboard:
         ax.grid(alpha=0.25)
 
         self.fig.canvas.draw_idle()
-        plt.pause(0.02)
+        if _pause:
+            plt.pause(0.02)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -376,6 +515,13 @@ def main() -> None:
             result["combination"] = label
             dash.add_result(result)
 
+    dash.setup_qpu(
+        problem=problem,
+        optimizer=optimizer,
+        backend=args.backend,
+        shots=args.qbraid_shots,
+        strategies=args.strategies,
+    )
     dash.finalize()
 
 
