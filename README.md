@@ -46,5 +46,9 @@ The CLI merges problem and executor options into one parser:
 ## Notes
 
 - `hardware` and `aer` modes require IBM Quantum credentials to be available through your saved account or `.env` configuration.
+- `qiskit-ibm-runtime` can load an account from environment variables. Set:
+  - `QISKIT_IBM_CHANNEL` (`ibm_cloud` or `ibm_quantum_platform`)
+  - `QISKIT_IBM_TOKEN` (IBM Cloud API key)
+  - `QISKIT_IBM_INSTANCE` ( CRN or service name)
 - `clifford` mode does not require IBM credentials.
 - The Clifford mode snaps parameters to multiples of `pi/2` so the stabilizer simulator can evaluate the circuit.
