@@ -103,9 +103,18 @@ class _LiveProblem:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _BG = "#161b22"
-_STRATEGY_COLORS = {"balanced": "#00d4ff", "aggressive": "#ef4444"}
-_ENV_MARKERS     = {"clifford": "s", "aer": "o", "hardware": "D", "cloud": "^"}
-_FALLBACK        = ["#8b5cf6", "#10b981", "#f59e0b", "#00d4ff", "#ef4444"]
+_COMBO_COLORS: dict[tuple[str, str], str] = {
+    ("balanced",   "clifford"): "#00d4ff",  # cyan
+    ("balanced",   "aer"):      "#10b981",  # green
+    ("balanced",   "hardware"): "#8b5cf6",  # purple
+    ("balanced",   "cloud"):    "#06b6d4",  # teal
+    ("aggressive", "clifford"): "#f59e0b",  # amber
+    ("aggressive", "aer"):      "#ef4444",  # red
+    ("aggressive", "hardware"): "#ec4899",  # pink
+    ("aggressive", "cloud"):    "#84cc16",  # lime
+}
+_ENV_MARKERS = {"clifford": "s", "aer": "o", "hardware": "D", "cloud": "^"}
+_FALLBACK    = ["#00d4ff", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
 
 
 def _run_key(r: dict) -> str:
@@ -113,7 +122,8 @@ def _run_key(r: dict) -> str:
 
 
 def _run_color(r: dict, idx: int) -> str:
-    return _STRATEGY_COLORS.get(r.get("strategy", ""), _FALLBACK[idx % len(_FALLBACK)])
+    key = (r.get("strategy", ""), r.get("environment", ""))
+    return _COMBO_COLORS.get(key, _FALLBACK[idx % len(_FALLBACK)])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -275,7 +285,7 @@ class _Dashboard:
         # ── 6a. Loss convergence curve ───────────────────────────────────────
         ax = self._ax_loss
         ax.cla(); ax.set_facecolor(_BG)
-        cycle = list(_STRATEGY_COLORS.values()) + _FALLBACK
+        cycle = list(_COMBO_COLORS.values()) + _FALLBACK
         for i, r in enumerate(rs):
             hist = r.get("loss_history", [])
             if hist:
@@ -293,12 +303,13 @@ class _Dashboard:
         # ── 6b. Strategy summary scatter ─────────────────────────────────────
         ax = self._ax_strat
         ax.cla(); ax.set_facecolor(_BG)
+        strat_color = {"balanced": "#00d4ff", "aggressive": "#ef4444"}
         for strat in ("balanced", "aggressive"):
             grp = [r for r in rs if r.get("strategy") == strat]
             if grp:
                 aq = float(np.mean([r.get("quality_score", 0.0) for r in grp]))
                 ac = float(np.mean([r.get("compiled_resource_cost", 0.0) for r in grp]))
-                color = _STRATEGY_COLORS.get(strat, "#8b5cf6")
+                color = strat_color.get(strat, "#8b5cf6")
                 ax.scatter(ac, aq, s=130, color=color, edgecolors="white",
                            linewidths=0.8, zorder=5)
                 ax.annotate(
