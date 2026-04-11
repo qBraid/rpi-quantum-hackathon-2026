@@ -15,7 +15,7 @@ from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_ibm_runtime.exceptions import RuntimeJobFailureError
 from executors.base import Executor, get_executor_logger
 from optimizers import Optimizer
-from problems.base import ParameterEvaluator, Problem
+from problems.base import ParameterEvaluator, Problem, format_float
 
 
 @dataclass(frozen=True)
@@ -506,23 +506,23 @@ class QBraidExecutor(Executor):
         compiled_resource_cost = self._calc_compiled_resource_cost(metrics)
         tradeoff_score = quality_score / max(compiled_resource_cost, 1e-9)
         logger.info(
-            "Run complete: %s=%s final_loss=%.6f cost=%.3f tradeoff=%.5f",
+            "Run complete: %s=%s final_loss=%s cost=%s tradeoff=%s",
             primary_metric_name,
-            primary_metric_value,
-            final_loss,
-            compiled_resource_cost,
-            tradeoff_score,
+            format_float(primary_metric_value) if isinstance(primary_metric_value, (int, float)) else primary_metric_value,
+            format_float(final_loss),
+            format_float(compiled_resource_cost),
+            format_float(tradeoff_score),
         )
 
         logger.info(
-            "Summary %s=%s loss=%.6f depth=%s twoq=%s cost=%.3f tradeoff=%.5f",
+            "Summary %s=%s loss=%s depth=%s twoq=%s cost=%s tradeoff=%s",
             primary_metric_name,
-            primary_metric_value,
-            final_loss,
+            format_float(primary_metric_value) if isinstance(primary_metric_value, (int, float)) else primary_metric_value,
+            format_float(final_loss),
             metrics.depth,
             metrics.two_qubit_ops,
-            compiled_resource_cost,
-            tradeoff_score,
+            format_float(compiled_resource_cost),
+            format_float(tradeoff_score),
         )
 
         return {

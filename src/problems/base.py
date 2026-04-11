@@ -11,6 +11,22 @@ class ParameterEvaluator(Protocol):
         """Return an expectation-value map for the supplied parameters."""
 
 
+def format_float_list(values: list[float], precision: int = 6) -> str:
+    """Format a list of floats with fixed precision while preserving negative signs."""
+    formatted: list[str] = []
+    for value in values:
+        formatted.append(format_float(value, precision=precision))
+    return f"[{', '.join(formatted)}]"
+
+
+def format_float(value: float, precision: int = 6) -> str:
+    """Format a scalar float with fixed precision while preserving negative signs."""
+    numeric = float(value)
+    if numeric == 0.0 and np.signbit(numeric):
+        return f"-{abs(numeric):.{precision}f}"
+    return f"{numeric:.{precision}f}"
+
+
 class CliArgumentProvider(ABC):
     @classmethod
     @abstractmethod

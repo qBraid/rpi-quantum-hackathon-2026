@@ -3,6 +3,8 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
+from problems.base import format_float
+
 
 def show_wildfire_result(postprocess: dict[str, Any], *, title: str, block: bool = True) -> None:
     """Render wildfire optimization output and display it in a matplotlib window."""
@@ -35,7 +37,12 @@ def show_wildfire_result(postprocess: dict[str, Any], *, title: str, block: bool
         ax.set_ylabel("Row")
 
     fire_break = postprocess.get("fire_break_score")
-    fig.suptitle(f"{title} | fire_break_score={fire_break}")
+    fire_break_str = (
+        format_float(float(fire_break))
+        if isinstance(fire_break, (int, float, np.floating))
+        else fire_break
+    )
+    fig.suptitle(f"{title} | fire_break_score={fire_break_str}")
     fig.tight_layout()
     plt.show(block=block)
 

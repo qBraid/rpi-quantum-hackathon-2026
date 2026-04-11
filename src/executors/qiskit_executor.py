@@ -13,7 +13,7 @@ from qiskit_ibm_runtime import QiskitRuntimeService
 
 from executors.base import Executor, get_executor_logger
 from optimizers import Optimizer
-from problems.base import ParameterEvaluator, Problem
+from problems.base import ParameterEvaluator, Problem, format_float
 
 
 @dataclass(frozen=True)
@@ -236,8 +236,8 @@ class QiskitExecutor(Executor):
         logger.info(
             "Result %s=%s objective=%s",
             primary_metric_name,
-            primary_metric_value,
-            result.fun,
+            format_float(primary_metric_value) if isinstance(primary_metric_value, (int, float)) else primary_metric_value,
+            format_float(result.fun),
         )
 
         average_iteration_time = float(np.mean(iteration_times)) if iteration_times else 0.0

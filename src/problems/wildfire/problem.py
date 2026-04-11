@@ -7,7 +7,7 @@ import numpy as np
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from GPTCircuitImproved import GridQuantumCircuit
 
-from problems.base import ParameterEvaluator, Problem
+from problems.base import ParameterEvaluator, Problem, format_float, format_float_list
 
 from .model import WildfireModel, WildfireProblemData
 
@@ -119,8 +119,7 @@ class WildfireMitigationProblem(Problem):
 
     @staticmethod
     def _format_parameter_list(values: list[float], precision: int = 6) -> str:
-        formatted = ", ".join(f"{value:.{precision}f}" for value in values)
-        return f"[{formatted}]"
+        return format_float_list(values, precision=precision)
 
     def describe_parameters(self, params: np.ndarray) -> dict[str, Any]:
         values = np.asarray(params, dtype=float)
@@ -165,12 +164,12 @@ class WildfireMitigationProblem(Problem):
             iter_time = time() - iter_start
             iteration_times.append(iter_time)
             logger.info(
-                "Iteration %3d loss=%10.6f gamma=%s beta=%s time=%.4fs",
+                "Iteration %3d loss=%s gamma=%s beta=%s time=%s",
                 len(experiment_results),
-                loss,
+                format_float(loss),
                 param_view["gamma_fmt"],
                 param_view["beta_fmt"],
-                iter_time,
+                format_float(iter_time),
             )
             experiment_results.append({"loss": loss, "exp_map": node_exp_map})
             return loss

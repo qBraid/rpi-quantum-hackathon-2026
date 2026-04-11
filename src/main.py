@@ -5,6 +5,7 @@ from typing import Any, TypeAlias
 from executors import Executor, QBraidExecutor, QiskitExecutor
 from optimizers import Optimizer, ScipyOptimizer, SpsaOptimizer
 from problems import MaxCutProblem, Problem, WildfireMitigationProblem
+from problems.base import format_float
 
 ProblemType: TypeAlias = type[Problem]
 ExecutorType: TypeAlias = type[Executor]
@@ -211,6 +212,12 @@ def _format_primary_metric(item: dict[str, Any]) -> tuple[str, Any]:
     return "metric", item.get("final_loss")
 
 
+def _format_metric_value(value: Any) -> Any:
+    if isinstance(value, (int, float)):
+        return format_float(value)
+    return value
+
+
 def _select_best_benchmark_result(
     results: list[dict[str, Any]], benchmark_topics: set[str]
 ) -> dict[str, Any]:
@@ -262,14 +269,14 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     for item in all_results:
         metric_name, metric_value = _format_primary_metric(item)
         print(
-            f"{item.get('combination')}: {metric_name}={metric_value} "
-            f"loss={item.get('final_loss')} topics={item.get('benchmark_topics')}"
+            f"{item.get('combination')}: {metric_name}={_format_metric_value(metric_value)} "
+            f"loss={_format_metric_value(item.get('final_loss'))} topics={item.get('benchmark_topics')}"
         )
     best_metric_name, best_metric_value = _format_primary_metric(best_result)
     print(
         "Best result: "
         f"{best_result.get('combination')} "
-        f"(run={best_result.get('run_label')}, {best_metric_name}={best_metric_value})"
+        f"(run={best_result.get('run_label')}, {best_metric_name}={_format_metric_value(best_metric_value)})"
     )
     print("=" * 70)
 
