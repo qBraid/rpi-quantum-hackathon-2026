@@ -13,9 +13,8 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_ibm_runtime.exceptions import RuntimeJobFailureError
-from scipy.optimize import minimize
-
 from executors.base import Executor, get_executor_logger
+from optimizers import Optimizer
 from problems.base import ParameterEvaluator, Problem
 
 
@@ -49,7 +48,6 @@ class QBraidExecutor(Executor):
     _RESULT_RETRY_BASE_DELAY_SECONDS = 2.0
 
     backend_name: str
-    maxiter: int
     strategy: str
     environment: str
     qbraid_shots: int
@@ -76,10 +74,10 @@ class QBraidExecutor(Executor):
         )
 
     @classmethod
-    def from_namespace(cls, args) -> Self:
+    def from_namespace(cls, args, *, optimizer: Optimizer) -> Self:
+        _ = optimizer
         return cls(
             backend_name=args.backend,
-            maxiter=args.maxiter,
             strategy=args.qbraid_strategy,
             environment=args.qbraid_environment,
             qbraid_shots=args.qbraid_shots,
@@ -404,7 +402,7 @@ class QBraidExecutor(Executor):
 
         return compiled, qbraid_used, time() - start
 
-    def execute(self, problem: Problem) -> dict[str, Any]:
+    def execute(self, problem: Problem, *, optimizer: Optimizer) -> dict[str, Any]:
         logger = self._logger()
         logger.info("Start %s", self.run_label)
         problem_data = problem.build_problem_data(logger=logger)
@@ -475,16 +473,12 @@ class QBraidExecutor(Executor):
         rng = np.random.default_rng(seed)
         num_parameters = int(compiled.num_parameters)
         initial_params = rng.random(num_parameters)
-        optimizer = problem.optimizer_config(num_parameters=num_parameters, maxiter=self.maxiter)
-        logger.info("Optimize using %s options=%s", optimizer.method, optimizer.options)
-
-        minimize_fn: Callable[..., Any] = cast(Any, minimize)
-        optimization_result = minimize_fn(
-            fun=cast(Any, objective),
-            x0=cast(Any, initial_params),
-            method=optimizer.method,
-            options=optimizer.options,
-        )
+        optimizer_options = getattr(optimizer, "options", None)
+        planned_sims = optimizer.planned_evaluations(num_parameters=num_parameters)
+        if planned_sims is not None:
+            logger.info("Simulation budget: up to %s objective evaluations", planned_sims)
+        logger.info("Optimize using %s", optimizer.label)
+        optimization_result = optimizer.optimize(loss_func, initial_params)
         logger.info(
             "Optimized parameters %s",
             problem.describe_parameters(np.asarray(optimization_result.x)),
@@ -541,9 +535,9 @@ class QBraidExecutor(Executor):
             "qbraid_shots": self.qbraid_shots if environment.name == "cloud" else None,
             "primary_metric_name": primary_metric_name,
             "primary_metric_value": primary_metric_value,
-            "optimizer_method": optimizer.method,
-            "optimizer_options": dict(optimizer.options),
-            "optimization_result": optimization_result,
+            "optimizer_method": optimizer.label,
+            "optimization_options": optimizer_options,
+            "optimization_result": optimization_result.raw_result,
             "final_loss": final_loss,
             "cut_size": cut_size,
             "quality_score": quality_score,

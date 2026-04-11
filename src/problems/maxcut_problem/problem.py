@@ -7,7 +7,7 @@ import numpy as np
 from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.library import efficient_su2
 
-from problems.base import OptimizerConfig, ParameterEvaluator, Problem
+from problems.base import ParameterEvaluator, Problem
 
 from .model import MaxCutModel, MaxCutProblemData
 
@@ -100,11 +100,6 @@ class MaxCutProblem(Problem):
     def metric_candidates(self) -> tuple[str, ...]:
         return ("cut_size",)
 
-    def optimizer_config(self, *, num_parameters: int, maxiter: int) -> OptimizerConfig:
-        return OptimizerConfig(
-            method="COBYLA",
-            options={"maxiter": max(maxiter, num_parameters + 2)},
-        )
 
     def make_loss(
         self,

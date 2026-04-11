@@ -2,17 +2,17 @@ from dataclasses import dataclass
 import logging
 from pathlib import Path
 from time import time
-from typing import Any, Callable, Self, cast
+from typing import Any, Callable, Self
 
 import numpy as np
 from dotenv import load_dotenv
-from scipy.optimize import minimize
 from qiskit_aer import AerSimulator
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from qiskit_ibm_runtime import QiskitRuntimeService
 
 from executors.base import Executor, get_executor_logger
+from optimizers import Optimizer
 from problems.base import ParameterEvaluator, Problem
 
 
@@ -28,7 +28,6 @@ class RuntimeBundle:
 class QiskitExecutor(Executor):
     mode: str
     backend_name: str
-    maxiter: int
 
     @classmethod
     def add_cli_arguments(cls, parser) -> None:
@@ -46,16 +45,11 @@ class QiskitExecutor(Executor):
                 "or qBraid device id when using qBraid cloud mode."
             ),
         )
-        parser.add_argument(
-            "--maxiter",
-            type=int,
-            default=10,
-            help="Maximum number of COBYLA iterations.",
-        )
 
     @classmethod
-    def from_namespace(cls, args) -> Self:
-        return cls(mode=args.mode, backend_name=args.backend, maxiter=args.maxiter)
+    def from_namespace(cls, args, *, optimizer: Optimizer) -> Self:
+        _ = optimizer
+        return cls(mode=args.mode, backend_name=args.backend)
 
     @property
     def run_label(self) -> str:
@@ -166,7 +160,7 @@ class QiskitExecutor(Executor):
 
         return "primary_metric", None
 
-    def execute(self, problem: Problem) -> dict[str, Any]:
+    def execute(self, problem: Problem, *, optimizer: Optimizer) -> dict[str, Any]:
         logger = self._logger()
         logger.info("Start mode=%s", self.mode)
         start_setup = time()
@@ -220,22 +214,17 @@ class QiskitExecutor(Executor):
         num_parameters = int(qc_optimized.num_parameters)
         initial_params = rng.random(num_parameters)
 
-        optimizer = problem.optimizer_config(num_parameters=num_parameters, maxiter=self.maxiter)
-        logger.info("Optimize on %s using %s", runtime.label, optimizer.method)
+        optimizer_options = getattr(optimizer, "options", None)
+        planned_sims = optimizer.planned_evaluations(num_parameters=num_parameters)
+        if planned_sims is not None:
+            logger.info("Simulation budget: up to %s objective evaluations", planned_sims)
+        logger.info("Optimize on %s using %s", runtime.label, optimizer.label)
 
         start_optimization = time()
-        objective: Callable[..., Any] = loss_func
-        minimize_fn: Callable[..., Any] = cast(Any, minimize)
-        # noinspection PyTypeChecker
-        result = minimize_fn(
-            fun=cast(Any, objective),
-            x0=cast(Any, initial_params),
-            method=optimizer.method,
-            options=optimizer.options,
-        )
+        result = optimizer.optimize(loss_func, initial_params)
         optimization_time = time() - start_optimization
         logger.info("Optimization %.4fs", optimization_time)
-        logger.info("Optimizer method=%s options=%s", optimizer.method, optimizer.options)
+        logger.info("Optimizer method=%s options=%s", optimizer.label, optimizer_options)
         logger.info("Optimized parameters %s", problem.describe_parameters(np.asarray(result.x)))
 
         postprocess = problem.postprocess(
@@ -276,12 +265,12 @@ class QiskitExecutor(Executor):
             "problem_setup_time": problem_data.setup_time,
             "circuit_time": circuit_time,
             "optimization_time": optimization_time,
-            "optimizer_method": optimizer.method,
-            "optimizer_options": dict(optimizer.options),
+            "optimizer_method": optimizer.label,
+            "optimizer_options": optimizer_options,
             "primary_metric_name": primary_metric_name,
             "primary_metric_value": primary_metric_value,
             "cut_size": postprocess.get("cut_size"),
-            "optimization_result": result,
+            "optimization_result": result.raw_result,
             "postprocess": postprocess,
             "experiment_results": experiment_results,
         }

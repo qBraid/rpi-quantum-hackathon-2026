@@ -3,10 +3,12 @@ from dataclasses import dataclass
 from typing import Any, TypeAlias
 
 from executors import Executor, QBraidExecutor, QiskitExecutor
+from optimizers import Optimizer, ScipyOptimizer, SpsaOptimizer
 from problems import MaxCutProblem, Problem, WildfireMitigationProblem
 
 ProblemType: TypeAlias = type[Problem]
 ExecutorType: TypeAlias = type[Executor]
+OptimizerType: TypeAlias = type[Optimizer]
 
 PROBLEMS: dict[str, ProblemType] = {
     "maxcut": MaxCutProblem,
@@ -16,6 +18,11 @@ PROBLEMS: dict[str, ProblemType] = {
 EXECUTORS: dict[str, ExecutorType] = {
     "qiskit": QiskitExecutor,
     "qbraid": QBraidExecutor,
+}
+
+OPTIMIZERS: dict[str, OptimizerType] = {
+    "scipy": ScipyOptimizer,
+    "spsa": SpsaOptimizer,
 }
 
 
@@ -82,9 +89,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable matplotlib visualization for wildfire runs.",
     )
+    parser.add_argument(
+        "--optimizer-backend",
+        choices=tuple(OPTIMIZERS) + ("auto",),
+        default="auto",
+        help="Optimizer backend implementation.",
+    )
+    parser.add_argument(
+        "--maxiter",
+        type=int,
+        default=None,
+        help="Backward-compatible alias for optimizer iteration/evaluation budget.",
+    )
 
     for problem_cls in PROBLEMS.values():
         problem_cls.add_cli_arguments(parser)
+    for optimizer_cls in OPTIMIZERS.values():
+        optimizer_cls.add_cli_arguments(parser)
     QiskitExecutor.add_cli_arguments(parser)
     QBraidExecutor.add_cli_arguments(parser)
     return parser
@@ -94,10 +115,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return build_parser().parse_args(argv)
 
 
-def _build_executor_runs(args: argparse.Namespace) -> list[ExecutorRun]:
+def _build_optimizer(args: argparse.Namespace) -> Optimizer:
+    if args.maxiter is not None:
+        args.optimizer_maxiter = int(args.maxiter)
+        args.spsa_maxiter = int(args.maxiter)
+
+    if args.optimizer_backend == "auto":
+        if args.problem == "wildfire":
+            return SpsaOptimizer.from_namespace(args)
+        return ScipyOptimizer.from_namespace(args)
+
+    optimizer_cls = OPTIMIZERS[args.optimizer_backend]
+    return optimizer_cls.from_namespace(args)
+
+
+def _build_executor_runs(args: argparse.Namespace, *, optimizer: Optimizer) -> list[ExecutorRun]:
     if not args.run_matrix:
         executor_cls = EXECUTORS[args.executor]
-        return [ExecutorRun(name=args.executor, executor=executor_cls.from_namespace(args))]
+        return [
+            ExecutorRun(
+                name=args.executor,
+                executor=executor_cls.from_namespace(args, optimizer=optimizer),
+            )
+        ]
 
     selected = args.benchmark_executors if args.benchmark_executors else [args.executor]
     runs: list[ExecutorRun] = []
@@ -111,7 +151,6 @@ def _build_executor_runs(args: argparse.Namespace) -> list[ExecutorRun]:
                         executor=QiskitExecutor(
                             mode=mode,
                             backend_name=args.backend,
-                            maxiter=args.maxiter,
                         ),
                     )
                 )
@@ -129,7 +168,6 @@ def _build_executor_runs(args: argparse.Namespace) -> list[ExecutorRun]:
                         ),
                         executor=QBraidExecutor(
                             backend_name=args.backend,
-                            maxiter=args.maxiter,
                             strategy=strategy,
                             environment=environment,
                             qbraid_shots=args.qbraid_shots,
@@ -188,7 +226,8 @@ def _select_best_benchmark_result(
 def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     problem_cls = PROBLEMS[args.problem]
     problem = problem_cls.from_namespace(args)
-    runs = _build_executor_runs(args)
+    optimizer = _build_optimizer(args)
+    runs = _build_executor_runs(args, optimizer=optimizer)
 
     topic_sets = [frozenset(run.executor.benchmark_topics) for run in runs]
     unique_topic_sets = set(topic_sets)
@@ -198,7 +237,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     all_results: list[dict[str, Any]] = []
     for run in runs:
         print(f"\n--- Running {run.executor.run_label} ---")
-        result = run.executor.execute(problem)
+        result = run.executor.execute(problem, optimizer=optimizer)
         result["combination"] = run.name
         all_results.append(result)
 
@@ -247,6 +286,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 
     return {
         "problem": args.problem,
+        "optimizer": optimizer.label,
         "benchmark_enabled": benchmark_enabled,
         "benchmark_summary": benchmark_summary,
         "results": all_results,

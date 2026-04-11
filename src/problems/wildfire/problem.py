@@ -5,9 +5,9 @@ from typing import Any, Callable, Self
 
 import numpy as np
 from qiskit.circuit import ParameterVector, QuantumCircuit
-from GPTCircuit import GridQuantumCircuit
+from GPTCircuitImproved import GridQuantumCircuit
 
-from problems.base import OptimizerConfig, ParameterEvaluator, Problem
+from problems.base import ParameterEvaluator, Problem
 
 from .model import WildfireModel, WildfireProblemData
 
@@ -81,7 +81,7 @@ class WildfireMitigationProblem(Problem):
         )
 
     def build_ansatz(self, *, logger: logging.Logger) -> QuantumCircuit:
-        logger.info("Building wildfire circuit via GPTCircuit.GridQuantumCircuit")
+        logger.info("Building wildfire circuit via GPTCircuitImproved.GridQuantumCircuit")
         gamma = ParameterVector("gamma", self.reps)
         beta = ParameterVector("beta", self.reps)
         num_qubits = self.grid_rows * self.grid_cols
@@ -135,14 +135,6 @@ class WildfireMitigationProblem(Problem):
             "params": [float(v) for v in values],
         }
 
-    def optimizer_config(self, *, num_parameters: int, maxiter: int) -> OptimizerConfig:
-        return OptimizerConfig(
-            method="Nelder-Mead",
-            options={
-                "maxiter": max(maxiter, num_parameters * 5 or 1),
-                "adaptive": True,
-            },
-        )
 
     def make_loss(
         self,

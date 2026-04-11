@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser, Namespace
-from dataclasses import dataclass
 import logging
 from typing import Any, Callable, Protocol, Self
 
@@ -10,12 +9,6 @@ import numpy as np
 class ParameterEvaluator(Protocol):
     def __call__(self, params: np.ndarray) -> dict[int, float]:
         """Return an expectation-value map for the supplied parameters."""
-
-
-@dataclass(frozen=True)
-class OptimizerConfig:
-    method: str
-    options: dict[str, Any]
 
 
 class CliArgumentProvider(ABC):
@@ -48,9 +41,6 @@ class Problem(CliArgumentProvider, ABC):
     def metric_candidates(self) -> tuple[str, ...]:
         """Return ordered postprocess keys that identify the problem's primary metric."""
 
-    @abstractmethod
-    def optimizer_config(self, *, num_parameters: int, maxiter: int) -> OptimizerConfig:
-        """Return the optimizer method and options for this problem."""
 
     def describe_parameters(self, params: np.ndarray) -> dict[str, Any]:
         """Return a problem-specific view of optimized parameters for logging/reporting."""

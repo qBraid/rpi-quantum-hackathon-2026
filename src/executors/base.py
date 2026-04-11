@@ -4,6 +4,7 @@ import logging
 import sys
 from typing import Any, Self
 
+from optimizers import Optimizer
 from problems.base import CliArgumentProvider, Problem
 
 
@@ -14,7 +15,7 @@ class Executor(CliArgumentProvider, ABC):
         """Register executor-specific CLI arguments."""
     @classmethod
     @abstractmethod
-    def from_namespace(cls, args: Namespace) -> Self:
+    def from_namespace(cls, args: Namespace, *, optimizer: Optimizer) -> Self:
         """Build an executor from parsed CLI arguments."""
 
     @property
@@ -28,7 +29,7 @@ class Executor(CliArgumentProvider, ABC):
         """Benchmark topics this executor can produce for comparisons."""
 
     @abstractmethod
-    def execute(self, problem: Problem) -> dict[str, Any]:
+    def execute(self, problem: Problem, *, optimizer: Optimizer) -> dict[str, Any]:
         """Run the problem and return a result summary."""
 
 
