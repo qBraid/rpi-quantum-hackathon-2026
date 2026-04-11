@@ -109,6 +109,20 @@ qBraid cloud mode:
 uv run python src/main.py --executor qbraid --qbraid-environment cloud --qbraid-strategy balanced --backend <qbraid_device_id> --grid-rows 10 --grid-cols 10 --qbraid-shots 2048
 ```
 
+### Artistic 3D shrub placement plot (PyVista + Matplotlib)
+
+Render an artistic 3D tile map and place shrubs as three rotating tree models from `assets/kenney_nature-kit`:
+
+```bash
+uv run python src/plot_wildfire_3d.py --grid-rows 10 --grid-cols 10 --shrub-budget 10
+```
+
+Optional: render off-screen and export a PNG snapshot:
+
+```bash
+uv run python src/plot_wildfire_3d.py --grid-rows 10 --grid-cols 10 --shrub-budget 10 --save-image outputs/wildfire_3d.png
+```
+
 ### Benchmarking and comparison matrices
 
 **Recommended: qBraid strategy comparison**

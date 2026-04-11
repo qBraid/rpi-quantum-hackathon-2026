@@ -15,6 +15,8 @@ def show_wildfire_result(postprocess: dict[str, Any], *, title: str, block: bool
     if risk_map.ndim != 2 or fuel_map.ndim != 2:
         raise ValueError("Wildfire postprocess data is missing 2D risk/fuel maps for plotting.")
 
+    num_rows, num_cols = risk_map.shape
+
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     risk_ax, fuel_ax = axes
@@ -35,6 +37,13 @@ def show_wildfire_result(postprocess: dict[str, Any], *, title: str, block: bool
     for ax in axes:
         ax.set_xlabel("Column")
         ax.set_ylabel("Row")
+        # Place one integer label at the center of each tile.
+        ax.set_xticks(np.arange(num_cols))
+        ax.set_yticks(np.arange(num_rows))
+        ax.set_xticklabels([str(col) for col in range(num_cols)])
+        ax.set_yticklabels([str(row) for row in range(num_rows)])
+        ax.set_xlim(-0.5, num_cols - 0.5)
+        ax.set_ylim(num_rows - 0.5, -0.5)
 
     fire_break = postprocess.get("fire_break_score")
     fire_break_str = (
