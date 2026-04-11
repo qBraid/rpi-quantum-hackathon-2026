@@ -1,14 +1,16 @@
 # Quantum Hackathon Wildfire Benchmark Suite
 
-This project benchmarks wildfire mitigation optimization workflows using a dependency-injected architecture. The suite compares quantum circuit compilation strategies and runtime environments to identify optimal quality/cost tradeoffs.
+This project benchmarks wildfire mitigation optimization workflows using a dependency-injected architecture. It supports both wildfire and MaxCut problems, single-run execution, and matrix benchmarking across Qiskit and qBraid environments to compare quality/cost tradeoffs.
 
 ## Project Structure
 
-- `src/problems/wildfire/` – wildfire mitigation problem using the layer-optimized circuit layout
+- `src/main.py` – the only user-facing benchmark entrypoint and composition root
+- `src/dashboard.py` – internal live qBraid matrix dashboard helper used by `src/main.py`
+- `src/problems/` – problem implementations, including wildfire mitigation and MaxCut
 - `src/executors/qiskit_executor.py` – Qiskit runtime executor
-- `src/executors/qbraid_executor.py` – qBraid-focused executor (including qBraid Quantum Cloud support)
+- `src/executors/qbraid_executor.py` – qBraid-focused executor, including qBraid Quantum Cloud support
 - `src/optimizers/` – SPSA and SciPy-based optimization backends
-- `src/main.py` – composition root with matrix orchestration and benchmark comparison logic
+- `src/plot_wildfire_3d.py` – standalone PyVista wildfire scene demo and image exporter
 
 ## Execution Environments
 
@@ -42,7 +44,7 @@ uv sync
 
 This creates `.venv` (if needed) and installs dependencies from `uv.lock`.
 
-### 4) Verify CLI wiring
+### 4) Inspect the benchmark CLI
 
 ```bash
 uv run python src/main.py --help
@@ -73,22 +75,34 @@ QBRAID_API_KEY=your_qbraid_api_key
 EOF
 ```
 
-### 6) Verify CLI wiring
+### 6) Run a benchmark
 
 ```bash
-uv run python src/main.py --help
+uv run python src/main.py --problem wildfire --grid-rows 10 --grid-cols 10 --shrub-budget 10
 ```
 
 ## Running Benchmarks
 
-The wildfire benchmark compares quantum circuit compilation strategies and execution environments. Use `uv run` to invoke all commands.
+The benchmark supports:
+
+- single-run wildfire or MaxCut optimization
+- matrix comparisons across qBraid and Qiskit executors
+- non-blocking wildfire visualization in 2D Matplotlib and 3D PyVista when running wildfire jobs
+
+Use `uv run` to invoke all commands.
 
 ### Single-run examples
 
-Clifford simulator (no credentials required):
+Wildfire on the Clifford simulator (no credentials required):
 
 ```bash
 uv run python src/main.py --grid-rows 10 --grid-cols 10 --shrub-budget 10
+```
+
+MaxCut single-run example:
+
+```bash
+uv run python src/main.py --problem maxcut --executor qiskit
 ```
 
 Qiskit on a specific IBM backend:
@@ -109,7 +123,7 @@ qBraid cloud mode:
 uv run python src/main.py --executor qbraid --qbraid-environment cloud --qbraid-strategy balanced --backend <qbraid_device_id> --grid-rows 10 --grid-cols 10 --qbraid-shots 2048
 ```
 
-### Artistic 3D shrub placement plot (PyVista + Matplotlib)
+### Standalone 3D wildfire scene (PyVista + Matplotlib)
 
 Render an artistic 3D tile map and place shrubs as three rotating GLB tree models from `assets/kenney_nature-kit/Models/GLTF format`:
 
@@ -141,6 +155,8 @@ uv run python src/main.py \
   --layer-reps 2
 ```
 
+When `--run-matrix` includes qBraid runs for the wildfire problem, the live dashboard helper in `src/dashboard.py` activates automatically and stays in sync with the non-blocking 2-panel Matplotlib result view and the optional PyVista scene. It is not a standalone launcher.
+
 **Executor comparison**
 
 Compare qiskit and qbraid on shared environments:
@@ -167,6 +183,7 @@ uv run python src/main.py \
 - `--brush-probability`: chance a cell starts as dry brush (default: 0.3)
 - `--wildfire-seed`: random seed for landscape generation
 - `--layer-reps`: layer-optimized circuit repetitions (default: 1)
+- `--headless`: disable wildfire visualization windows (2D Matplotlib and 3D PyVista)
 
 **Executor parameters:**
 
@@ -176,6 +193,11 @@ uv run python src/main.py \
 - `--qbraid-strategy`: compilation strategy (`balanced`, `aggressive`)
 - `--qbraid-environment`: execution environment (`hardware`, `aer`, `clifford`, `cloud`)
 - `--qbraid-shots`: shots per iteration in cloud mode (default: 1024)
+
+**Optimizer parameters:**
+
+- `--optimizer-backend`: choose `auto`, `scipy`, or `spsa`
+- `--maxiter`: optimizer iteration/evaluation budget alias
 
 **Matrix benchmarking parameters:**
 
@@ -189,13 +211,13 @@ uv run python src/main.py \
 
 ### Algorithm
 
-This benchmark performs **wildfire mitigation** optimization leveraging QAOA. The default optimizer is a hardware-friendly **SPSA** backend, selected through dependency injection for robustness on real quantum hardware.
+This benchmark performs **wildfire mitigation** optimization leveraging QAOA and **MaxCut** benchmarking for comparison workloads. In `auto` mode, the optimizer defaults to **SPSA** for wildfire and **SciPy** for MaxCut, selected through dependency injection for robustness.
 
 ### Architecture
 
 The benchmark is organized around a composition root in `src/main.py` that wires together:
 
-- a **problem** object (`src/problems/wildfire/`)
+- a **problem** object (`src/problems/`, including wildfire and MaxCut)
 - an **executor** object (`src/executors/...`)
 - an **optimizer** object (`src/optimizers/...`)
 
@@ -239,6 +261,8 @@ The best tradeoff is the combination with the highest observed `tradeoff_score` 
 - `--executor`: selects the executor implementation (`qiskit` or `qbraid`) for single-run mode
 - `--run-matrix`: run all selected executor/option combinations
 - `--headless`: disable all wildfire visualization windows (Matplotlib 2D + PyVista 3D)
+- `--optimizer-backend`: choose `auto`, `scipy`, or `spsa`
+- `--maxiter`: optimizer iteration/evaluation budget alias
 
 ### Problem parameters
 
@@ -253,7 +277,7 @@ The best tradeoff is the combination with the highest observed `tradeoff_score` 
 
 - `--mode`: execution backend (`hardware`, `aer`, `clifford`)
 - `--backend`: IBM backend name used for `hardware` and `aer` modes
-- `--maxiter`: COBYLA iteration limit
+- `--maxiter`: optimizer iteration/evaluation budget alias
 
 ### qBraid executor options
 
@@ -267,6 +291,12 @@ The best tradeoff is the combination with the highest observed `tradeoff_score` 
 - `--benchmark-qiskit-modes`: Qiskit modes to compare
 - `--benchmark-qbraid-strategies`: qBraid strategies to compare
 - `--benchmark-qbraid-environments`: qBraid environments to compare
+
+### qBraid matrix dashboard
+
+- Automatically appears for wildfire matrix runs that include qBraid executors
+- Updates live after each qBraid optimization iteration
+- Saves a summary image to `src/benchmark_result.png`
 
 ## Logging Behavior
 

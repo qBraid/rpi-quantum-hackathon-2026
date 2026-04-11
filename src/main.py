@@ -259,6 +259,28 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     optimizer = _build_optimizer(args)
     runs = _build_executor_runs(args, optimizer=optimizer)
 
+    should_use_dashboard = (
+        args.problem == "wildfire"
+        and args.run_matrix
+        and any(isinstance(run.executor, QBraidExecutor) for run in runs)
+    )
+    dashboard = None
+    if should_use_dashboard:
+        from dashboard import BenchmarkDashboard, LiveProblem
+
+        dashboard = BenchmarkDashboard()
+        dashboard_qbraid_strategies: list[str] = []
+        for run in runs:
+            if isinstance(run.executor, QBraidExecutor) and run.executor.strategy not in dashboard_qbraid_strategies:
+                dashboard_qbraid_strategies.append(run.executor.strategy)
+        dashboard.setup_qpu(
+            problem=problem,
+            optimizer=optimizer,
+            backend=args.backend,
+            shots=args.qbraid_shots,
+            strategies=dashboard_qbraid_strategies,
+        )
+
     topic_sets = [frozenset(run.executor.benchmark_topics) for run in runs]
     unique_topic_sets = set(topic_sets)
     benchmark_topics = set(topic_sets[0]) if topic_sets else set()
@@ -276,9 +298,17 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     all_results: list[dict[str, Any]] = []
     for run in runs:
         print(f"\n--- Running {run.executor.run_label} ---")
-        result = run.executor.execute(problem, optimizer=optimizer)
+        if dashboard is not None and isinstance(run.executor, QBraidExecutor):
+            dashboard.set_current_run(f"{run.executor.strategy}/{run.executor.environment}")
+            live_problem = LiveProblem(problem, on_iteration=dashboard.record_iteration)
+            result = run.executor.execute(live_problem, optimizer=optimizer)
+        else:
+            result = run.executor.execute(problem, optimizer=optimizer)
         result["combination"] = run.name
         all_results.append(result)
+
+        if dashboard is not None and isinstance(run.executor, QBraidExecutor):
+            dashboard.add_result(result)
 
         if should_plot_wildfire and show_wildfire_result is not None:
             postprocess = result.get("postprocess")
@@ -298,6 +328,10 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
                     )
                     if plotter is not None:
                         open_plotters.append(plotter)
+
+    if dashboard is not None:
+        dashboard_fig = dashboard.finalize(block=False)
+        open_figures.append(dashboard_fig)
 
     best_result = _select_best_result(all_results)
 
@@ -331,7 +365,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     )
     print("=" * 70)
 
-    if should_plot_wildfire and (open_figures or open_plotters):
+    if open_figures or open_plotters:
         while True:
             active_figures = [fig for fig in open_figures if plt.fignum_exists(fig.number)]
             active_plotters = [plotter for plotter in open_plotters if not getattr(plotter, "_closed", True)]
