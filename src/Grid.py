@@ -1,4 +1,5 @@
-from qiskit import QuantumCircuit, QAOAAnsatz, PauliOp
+from qiskit import QuantumCircuit
+import matplotlib.pyplot as plt
 import random
 
 class Grid:
@@ -8,6 +9,7 @@ class Grid:
         self.width = width
         self.bushes = bushes
         self.budget = budget
+        self.toyons = set()
         self.idx = dict()
         for i, bush in enumerate(bushes):
             self.idx[bush] = i # Map 2D grid coordinate -> 1D index
@@ -21,6 +23,27 @@ class Grid:
             bush = (random.randint(0, length - 1), random.randint(0, width - 1))
             bushes.add(bush)
         return cls(length, width, list(bushes), budget)
+    
+    def implement_solution(self, solution: list[int]):
+        """Given a binary solution vector, mark the corresponding bushes as occupied by toyons."""
+        for i, val in enumerate(solution):
+            if val == 1:
+                bush = self.bushes[i]
+                self.toyons.add(bush)
+        pass
+    
+    def plot(self, show = True):
+        fig, ax = plt.subplots()
+        for bush in self.bushes:
+            ax.fill_between([bush[1] - 0.5, bush[1] + 0.5], bush[0] - 0.5, bush[0] + 0.5, color='red' if bush in self.toyons else 'green', alpha=0.5) # Note: (x, y) = (col, row)
+        ax.set_xlim(-0.5, self.width - 0.5)
+        ax.set_ylim(-0.5, self.length - 0.5)
+        ax.set_aspect('equal')
+        plt.axis('off')
+        plt.gca().invert_yaxis() # Invert y-axis to match grid coordinates
+        if show:
+            plt.show()
+        pass
 
     def BuildEdges(self) -> list[tuple[int, int]]:
         edges = []
