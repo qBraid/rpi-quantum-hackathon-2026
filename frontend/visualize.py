@@ -1,241 +1,367 @@
 """
-Visualize QAOA MaxCut results using matplotlib.
-Run: python frontend/visualize.py
-"""
+qBraid Challenge — Compiler-Aware Quantum Benchmarking
+Live matplotlib dashboard.
 
-import json
-import os
-import matplotlib.pyplot as plt
+Runs QAOA MaxCut through the qBraid executor matrix
+(balanced / aggressive) × (clifford / aer) and updates six
+charts in real time as each run completes.
+
+Usage (from repo root, venv active):
+    python frontend/visualize.py
+    python frontend/visualize.py --num-nodes 6 --num-qubits 6 --optimizer-maxiter 5
+    python frontend/visualize.py --strategies balanced aggressive --environments clifford aer
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# ── Make src/ importable ───────────────────────────────────────────────────────
+_SRC = Path(__file__).resolve().parents[1] / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+import argparse
+from typing import Any, Callable
+
 import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 import numpy as np
 
-# ── Load result files ──────────────────────────────────────────────────────────
-RESULTS_DIR = os.path.join(os.path.dirname(__file__), "..", "results")
+from executors import QBraidExecutor
+from optimizers import ScipyOptimizer
+from problems import MaxCutProblem
+from problems.base import Problem
 
-DATASETS = {
-    "4x4 smoke (sim noise)":  os.path.join(RESULTS_DIR, "hw_smoke",        "summary.json"),
-    "4x4 skip-flags":         os.path.join(RESULTS_DIR, "smoke_skipflags", "summary.json"),
-    "4x4 test-flags":         os.path.join(RESULTS_DIR, "test_flags",       "summary.json"),
-    "6x6 IBM real (run 1)":   os.path.join(RESULTS_DIR, "results",          "hw_ibm_6x6", "summary.json"),
-    "6x6 IBM real (run 2)":   os.path.join(RESULTS_DIR, "results",          "summary.json"),
-}
+# ─────────────────────────────────────────────────────────────────────────────
+# CLI
+# ─────────────────────────────────────────────────────────────────────────────
 
-data = {}
-for label, path in DATASETS.items():
-    if os.path.exists(path):
-        with open(path) as f:
-            data[label] = json.load(f)
-    else:
-        print(f"[warn] missing: {path}")
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Live qBraid QAOA MaxCut benchmarking dashboard"
+    )
+    p.add_argument("--num-nodes",          type=int,   default=6)
+    p.add_argument("--num-qubits",         type=int,   default=6)
+    p.add_argument("--graph-probability",  type=float, default=0.5)
+    p.add_argument("--seed",               type=int,   default=42)
+    p.add_argument("--reps",               type=int,   default=1)
+    p.add_argument("--optimizer-maxiter",  type=int,   default=10)
+    p.add_argument("--backend",            default="ibm_rensselaer")
+    p.add_argument("--qbraid-shots",       type=int,   default=1024)
+    p.add_argument(
+        "--strategies", nargs="+",
+        default=["balanced", "aggressive"],
+        choices=["balanced", "aggressive"],
+        help="qBraid compilation strategies to compare.",
+    )
+    p.add_argument(
+        "--environments", nargs="+",
+        default=["clifford", "aer"],
+        choices=["hardware", "aer", "clifford", "cloud"],
+        help="Execution environments to run on.",
+    )
+    return p
 
 
-# ── Plot 1 — Cost comparison per dataset ──────────────────────────────────────
-def plot_cost_comparison(data: dict):
-    fig, axes = plt.subplots(1, len(data), figsize=(5 * len(data), 5), sharey=False)
-    if len(data) == 1:
-        axes = [axes]
+# ─────────────────────────────────────────────────────────────────────────────
+# Live-problem wrapper — intercepts each loss iteration
+# ─────────────────────────────────────────────────────────────────────────────
 
-    for ax, (label, d) in zip(axes, data.items()):
-        names, costs, colors = [], [], []
+class _LiveProblem:
+    """Wraps a Problem and injects a per-iteration loss callback into make_loss."""
 
-        greedy = d.get("greedy_cost")
-        bf = d.get("brute_force_cost")
-        sa = d.get("simulated_annealing_cost")
+    def __init__(self, problem: Problem, on_iteration: Callable[[float], None]) -> None:
+        self._problem = problem
+        self._on_iteration = on_iteration
 
-        if greedy is not None:
-            names.append("Greedy"); costs.append(greedy); colors.append("#f59e0b")
-        if bf is not None:
-            names.append("Brute\nForce"); costs.append(bf); colors.append("#10b981")
-        if sa is not None:
-            names.append("Sim.\nAnnealing"); costs.append(sa); colors.append("#06b6d4")
+    # Override only make_loss; everything else is delegated.
+    def make_loss(self, *, problem_data, evaluator, experiment_results, iteration_times, logger):
+        original = self._problem.make_loss(
+            problem_data=problem_data,
+            evaluator=evaluator,
+            experiment_results=experiment_results,
+            iteration_times=iteration_times,
+            logger=logger,
+        )
+        cb = self._on_iteration
 
-        for solver_name, s in d.get("solvers", {}).items():
-            fc = s.get("best_feasible_cost")
-            if fc is not None:
-                names.append(solver_name.replace("_", "\n")); costs.append(fc); colors.append("#8b5cf6")
+        def wrapped(params: np.ndarray) -> float:
+            val = original(params)
+            cb(float(val))
+            return val
 
-        hw = d.get("hardware", {})
-        if hw.get("best_cost") is not None:
-            feasible_tag = " (feasible)" if hw.get("feasible") else " (infeasible)"
-            names.append("HW IBM" + feasible_tag.replace(" ", "\n")); costs.append(hw["best_cost"]); colors.append("#ef4444")
+        return wrapped
 
-        bars = ax.bar(names, costs, color=colors, edgecolor="white", linewidth=0.5)
-        ax.bar_label(bars, fmt="%.1f", padding=3, fontsize=8)
-        ax.set_title(label, fontsize=9, fontweight="bold")
-        ax.set_ylabel("Cut cost (↑ better)")
-        ax.set_ylim(0, max(costs) * 1.2 if costs else 1)
+    def __getattr__(self, name: str):
+        return getattr(self._problem, name)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Palette / helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+_BG = "#161b22"
+_STRATEGY_COLORS = {"balanced": "#00d4ff", "aggressive": "#ef4444"}
+_ENV_MARKERS     = {"clifford": "s", "aer": "o", "hardware": "D", "cloud": "^"}
+_FALLBACK        = ["#8b5cf6", "#10b981", "#f59e0b", "#00d4ff", "#ef4444"]
+
+
+def _run_key(r: dict) -> str:
+    return f"{r.get('strategy','?')}/{r.get('environment','?')}"
+
+
+def _run_color(r: dict, idx: int) -> str:
+    return _STRATEGY_COLORS.get(r.get("strategy", ""), _FALLBACK[idx % len(_FALLBACK)])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Live dashboard
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _Dashboard:
+    """Six-panel matplotlib dashboard that updates live after every loss iteration."""
+
+    _TITLE = (
+        "qBraid Challenge — Compiler-Aware QAOA MaxCut\n"
+        "Strategy: balanced (opt-level 1)  vs  aggressive (opt-level 3)"
+    )
+
+    def __init__(self) -> None:
+        plt.style.use("dark_background")
+        self.fig = plt.figure(figsize=(16, 10))
+        self.fig.patch.set_facecolor("#0d1117")
+        self.fig.suptitle(self._TITLE, fontsize=10, fontweight="bold", color="white")
+
+        gs = gridspec.GridSpec(3, 3, figure=self.fig, hspace=0.62, wspace=0.42)
+        self._ax_quality  = self.fig.add_subplot(gs[0, :2])
+        self._ax_tradeoff = self.fig.add_subplot(gs[0, 2])
+        self._ax_depth    = self.fig.add_subplot(gs[1, 0])
+        self._ax_twoq     = self.fig.add_subplot(gs[1, 1])
+        self._ax_approx   = self.fig.add_subplot(gs[1, 2])
+        self._ax_loss     = self.fig.add_subplot(gs[2, :2])
+        self._ax_strat    = self.fig.add_subplot(gs[2, 2])
+        for ax in self.fig.get_axes():
+            ax.set_facecolor(_BG)
+
+        self._results: list[dict[str, Any]] = []
+        self._cur_loss: list[float] = []
+        self._cur_label: str = ""
+
+        plt.ion()
+        plt.tight_layout()
+        plt.pause(0.05)
+
+    # ── public API ────────────────────────────────────────────────────────────
+
+    def set_current_run(self, label: str) -> None:
+        self._cur_label = label
+        self._cur_loss = []
+        self._draw()
+
+    def record_iteration(self, loss: float) -> None:
+        self._cur_loss.append(loss)
+        self._draw()
+
+    def add_result(self, result: dict[str, Any]) -> None:
+        exp = result.get("experiment_results") or []
+        r = dict(result)
+        r["loss_history"] = (
+            [float(e["loss"]) for e in exp if "loss" in e] if exp else list(self._cur_loss)
+        )
+        self._results.append(r)
+        self._cur_loss = []
+        self._cur_label = ""
+        self._draw()
+
+    def finalize(self) -> None:
+        plt.ioff()
+        end_title = self._TITLE + "\n— benchmark complete —"
+        self.fig.suptitle(end_title, fontsize=10, fontweight="bold", color="#10b981")
+        self._draw()
+        out = Path(__file__).resolve().parent / "benchmark_result.png"
+        self.fig.savefig(out, dpi=150, bbox_inches="tight", facecolor=self.fig.get_facecolor())
+        print(f"\n[dashboard] saved → {out}")
+        plt.show(block=True)
+
+    # ── internal draw ─────────────────────────────────────────────────────────
+
+    def _draw(self) -> None:
+        rs = self._results
+        cl = self._cur_loss
+        lb = self._cur_label
+
+        # ── 1. Quality scores ────────────────────────────────────────────────
+        ax = self._ax_quality
+        ax.cla(); ax.set_facecolor(_BG)
+        if rs:
+            keys   = [_run_key(r) for r in rs]
+            scores = [r.get("quality_score", 0.0) for r in rs]
+            cols   = [_run_color(r, i) for i, r in enumerate(rs)]
+            bars   = ax.bar(keys, scores, color=cols, edgecolor="white", linewidth=0.4)
+            ax.bar_label(bars, fmt="%.2f", padding=3, fontsize=7, color="white")
+        ax.set_title("Output Quality — Cut size / quality score  (↑ better)", fontsize=8, fontweight="bold")
+        ax.set_ylabel("Quality score", fontsize=7)
         ax.tick_params(axis="x", labelsize=7)
-        ax.grid(axis="y", alpha=0.3)
+        ax.grid(axis="y", alpha=0.25)
+        if lb:
+            ax.set_xlabel(f"⏳ Running: {lb}", fontsize=7, color="#f59e0b")
 
-    fig.suptitle("Cut Cost Comparison Across Solvers", fontweight="bold", fontsize=12)
-    fig.tight_layout()
-    return fig
+        # ── 2. Quality vs compiled resource cost (tradeoff scatter) ──────────
+        ax = self._ax_tradeoff
+        ax.cla(); ax.set_facecolor(_BG)
+        for i, r in enumerate(rs):
+            ax.scatter(
+                r.get("compiled_resource_cost", 0),
+                r.get("quality_score", 0),
+                color=_run_color(r, i),
+                marker=_ENV_MARKERS.get(r.get("environment", ""), "o"),
+                s=90, zorder=3,
+                label=_run_key(r),
+                edgecolors="white", linewidths=0.5,
+            )
+        if rs:
+            ax.legend(fontsize=6, loc="best")
+        ax.set_title("Quality vs Resource Cost", fontsize=8, fontweight="bold")
+        ax.set_xlabel("Compiled resource cost  ↓", fontsize=7)
+        ax.set_ylabel("Quality  ↑", fontsize=7)
+        ax.grid(alpha=0.25)
 
+        # ── 3. Circuit depth ─────────────────────────────────────────────────
+        ax = self._ax_depth
+        ax.cla(); ax.set_facecolor(_BG)
+        if rs:
+            keys = [_run_key(r) for r in rs]
+            vals = [r.get("metrics", {}).get("depth", 0) for r in rs]
+            cols = [_run_color(r, i) for i, r in enumerate(rs)]
+            bars = ax.bar(keys, vals, color=cols, edgecolor="white", linewidth=0.4)
+            ax.bar_label(bars, padding=2, fontsize=7, color="white")
+        ax.set_title("Circuit Depth  (↓ better)", fontsize=8, fontweight="bold")
+        ax.tick_params(axis="x", labelsize=6)
+        ax.grid(axis="y", alpha=0.25)
 
-# ── Plot 2 — Approximation ratios ─────────────────────────────────────────────
-def plot_approximation_ratios(data: dict):
-    labels, ratios, bar_labels = [], [], []
+        # ── 4. 2-qubit gate count ────────────────────────────────────────────
+        ax = self._ax_twoq
+        ax.cla(); ax.set_facecolor(_BG)
+        if rs:
+            keys = [_run_key(r) for r in rs]
+            vals = [r.get("metrics", {}).get("two_qubit_ops", 0) for r in rs]
+            cols = [_run_color(r, i) for i, r in enumerate(rs)]
+            bars = ax.bar(keys, vals, color=cols, edgecolor="white", linewidth=0.4)
+            ax.bar_label(bars, padding=2, fontsize=7, color="white")
+        ax.set_title("2-Qubit Gate Count  (↓ better)", fontsize=8, fontweight="bold")
+        ax.tick_params(axis="x", labelsize=6)
+        ax.grid(axis="y", alpha=0.25)
 
-    for dataset_label, d in data.items():
-        for solver_name, s in d.get("solvers", {}).items():
-            ar = s.get("approximation_ratio")
-            if ar is not None:
-                labels.append(f"{dataset_label}\n{solver_name}")
-                ratios.append(ar)
-                bar_labels.append(f"{ar:.3f}")
+        # ── 5. Relative approximation ratio ──────────────────────────────────
+        ax = self._ax_approx
+        ax.cla(); ax.set_facecolor(_BG)
+        if rs:
+            scores = [r.get("quality_score", 0.0) for r in rs]
+            best   = max(scores) if scores else 1.0
+            keys   = [_run_key(r) for r in rs]
+            ratios = [s / max(best, 1e-9) for s in scores]
+            cols   = ["#10b981" if v >= 0.99 else _run_color(r, i) for i, (r, v) in enumerate(zip(rs, ratios))]
+            bars   = ax.bar(keys, ratios, color=cols, edgecolor="white", linewidth=0.4)
+            ax.bar_label(bars, fmt="%.3f", padding=2, fontsize=7, color="white")
+            ax.axhline(1.0, color="#10b981", linestyle="--", linewidth=1, label="best run")
+            ax.legend(fontsize=6)
+        ax.set_title("Approx. Ratio  (quality / best run)", fontsize=8, fontweight="bold")
+        ax.tick_params(axis="x", labelsize=6)
+        ax.set_ylim(0, 1.35)
+        ax.grid(axis="y", alpha=0.25)
 
-    if not ratios:
-        return None
+        # ── 6a. Loss convergence curve ───────────────────────────────────────
+        ax = self._ax_loss
+        ax.cla(); ax.set_facecolor(_BG)
+        cycle = list(_STRATEGY_COLORS.values()) + _FALLBACK
+        for i, r in enumerate(rs):
+            hist = r.get("loss_history", [])
+            if hist:
+                ax.plot(hist, color=cycle[i % len(cycle)], linewidth=0.9,
+                        alpha=0.75, label=_run_key(r))
+        if cl:
+            ax.plot(cl, color="#f59e0b", linewidth=1.6,
+                    label=f"{lb} (live)" if lb else "current (live)")
+        ax.set_title("Optimization Loss Convergence", fontsize=8, fontweight="bold")
+        ax.set_xlabel("Iteration", fontsize=7)
+        ax.set_ylabel("Loss", fontsize=7)
+        ax.legend(fontsize=7, loc="upper right")
+        ax.grid(alpha=0.2)
 
-    fig, ax = plt.subplots(figsize=(max(8, len(labels) * 1.4), 5))
-    colors = ["#10b981" if r >= 1.0 else "#ef4444" for r in ratios]
-    bars = ax.bar(labels, ratios, color=colors, edgecolor="white", linewidth=0.5)
-    ax.bar_label(bars, labels=bar_labels, padding=3, fontsize=8)
-    ax.axhline(1.0, color="white", linestyle="--", linewidth=1, label="Optimal (ratio = 1.0)")
-    ax.set_title("Approximation Ratio per Solver  (green ≥ 1.0 = beats greedy)", fontweight="bold")
-    ax.set_ylabel("Approximation ratio (best_feasible / greedy)")
-    ax.set_ylim(0, max(ratios) * 1.2)
-    ax.tick_params(axis="x", labelsize=7)
-    ax.legend(fontsize=8)
-    ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout()
-    return fig
+        # ── 6b. Strategy summary scatter ─────────────────────────────────────
+        ax = self._ax_strat
+        ax.cla(); ax.set_facecolor(_BG)
+        for strat in ("balanced", "aggressive"):
+            grp = [r for r in rs if r.get("strategy") == strat]
+            if grp:
+                aq = float(np.mean([r.get("quality_score", 0.0) for r in grp]))
+                ac = float(np.mean([r.get("compiled_resource_cost", 0.0) for r in grp]))
+                color = _STRATEGY_COLORS.get(strat, "#8b5cf6")
+                ax.scatter(ac, aq, s=130, color=color, edgecolors="white",
+                           linewidths=0.8, zorder=5)
+                ax.annotate(
+                    f" {strat}\n Q={aq:.1f}\n C={ac:.0f}",
+                    (ac, aq), fontsize=7, color=color,
+                    xytext=(6, 4), textcoords="offset points",
+                )
+        ax.set_title("Strategy Summary\n(avg across environments)", fontsize=8, fontweight="bold")
+        ax.set_xlabel("Avg cost", fontsize=7)
+        ax.set_ylabel("Avg quality", fontsize=7)
+        ax.grid(alpha=0.25)
 
-
-# ── Plot 3 — Elapsed time ─────────────────────────────────────────────────────
-def plot_elapsed_times(data: dict):
-    solver_labels, solver_times = [], []
-    hw_labels, hw_times = [], []
-
-    for dataset_label, d in data.items():
-        for solver_name, s in d.get("solvers", {}).items():
-            t = s.get("elapsed")
-            if t is not None:
-                solver_labels.append(f"{dataset_label}\n{solver_name}")
-                solver_times.append(t)
-
-        hw = d.get("hardware", {})
-        if hw.get("elapsed") is not None:
-            hw_labels.append(dataset_label)
-            hw_times.append(hw["elapsed"])
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-
-    if solver_times:
-        bars = ax1.bar(solver_labels, solver_times, color="#8b5cf6", edgecolor="white", linewidth=0.5)
-        ax1.bar_label(bars, fmt="%.3fs", padding=3, fontsize=8)
-        ax1.set_title("Classical Solver Elapsed Time", fontweight="bold")
-        ax1.set_ylabel("Seconds")
-        ax1.tick_params(axis="x", labelsize=7)
-        ax1.grid(axis="y", alpha=0.3)
-    else:
-        ax1.set_visible(False)
-
-    if hw_times:
-        bars = ax2.bar(hw_labels, hw_times, color="#ef4444", edgecolor="white", linewidth=0.5)
-        ax2.bar_label(bars, fmt="%.2fs", padding=3, fontsize=8)
-        ax2.set_title("Hardware Execution Elapsed Time", fontweight="bold")
-        ax2.set_ylabel("Seconds")
-        ax2.tick_params(axis="x", labelsize=7)
-        ax2.grid(axis="y", alpha=0.3)
-    else:
-        ax2.set_visible(False)
-
-    fig.suptitle("Elapsed Time: Classical Optimization vs Hardware", fontweight="bold", fontsize=12)
-    fig.tight_layout()
-    return fig
-
-
-# ── Plot 4 — Hardware circuit stats ───────────────────────────────────────────
-def plot_hardware_stats(data: dict):
-    hw_entries = [(lbl, d["hardware"]) for lbl, d in data.items()
-                  if d.get("hardware") and d["hardware"].get("depth") is not None]
-    if not hw_entries:
-        return None
-
-    labels = [e[0] for e in hw_entries]
-    depths = [e[1]["depth"] for e in hw_entries]
-    qubits = [e[1].get("num_qubits", 0) for e in hw_entries]
-    shots  = [e[1].get("shots", 0) for e in hw_entries]
-
-    x = np.arange(len(labels))
-    width = 0.25
-
-    fig, ax = plt.subplots(figsize=(max(8, len(labels) * 2.5), 5))
-    b1 = ax.bar(x - width, depths, width, label="Circuit Depth", color="#00d4ff", edgecolor="white")
-    b2 = ax.bar(x,         qubits, width, label="Qubits Used",   color="#8b5cf6", edgecolor="white")
-    b3 = ax.bar(x + width, shots,  width, label="Shots",         color="#f59e0b", edgecolor="white")
-
-    ax.bar_label(b1, padding=3, fontsize=8)
-    ax.bar_label(b2, padding=3, fontsize=8)
-    ax.bar_label(b3, padding=3, fontsize=8)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=8)
-    ax.set_title("Hardware Circuit Statistics", fontweight="bold")
-    ax.set_ylabel("Count")
-    ax.legend(fontsize=9)
-    ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout()
-    return fig
+        self.fig.canvas.draw_idle()
+        plt.pause(0.02)
 
 
-# ── Plot 5 — Feasibility summary ──────────────────────────────────────────────
-def plot_feasibility(data: dict):
-    solver_feasible = solver_infeasible = 0
-    hw_feasible     = hw_infeasible     = 0
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ─────────────────────────────────────────────────────────────────────────────
 
-    for d in data.values():
-        for s in d.get("solvers", {}).values():
-            if s.get("feasible"):
-                solver_feasible += 1
-            else:
-                solver_infeasible += 1
-        hw = d.get("hardware", {})
-        if hw:
-            if hw.get("feasible"):
-                hw_feasible += 1
-            elif hw.get("best_cost") is not None:
-                hw_infeasible += 1
+def main() -> None:
+    args = _build_parser().parse_args()
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9, 5))
+    problem = MaxCutProblem(
+        num_nodes=args.num_nodes,
+        num_qubits=args.num_qubits,
+        graph_probability=args.graph_probability,
+        seed=args.seed,
+        reps=args.reps,
+    )
+    optimizer = ScipyOptimizer(
+        method="nelder-mead",
+        maxiter=args.optimizer_maxiter,
+        adaptive=False,
+    )
 
-    def pie(ax, yes, no, title):
-        if yes + no == 0:
-            ax.set_visible(False)
-            return
-        ax.pie([yes, no], labels=[f"Feasible ({yes})", f"Infeasible ({no})"],
-               colors=["#10b981", "#ef4444"], autopct="%1.0f%%",
-               startangle=90, textprops={"fontsize": 10})
-        ax.set_title(title, fontweight="bold")
+    dash = _Dashboard()
 
-    pie(ax1, solver_feasible,  solver_infeasible,  "Classical Solvers — Feasibility")
-    pie(ax2, hw_feasible,      hw_infeasible,      "Hardware Runs — Feasibility")
+    for strategy in args.strategies:
+        for environment in args.environments:
+            executor = QBraidExecutor(
+                backend_name=args.backend,
+                strategy=strategy,
+                environment=environment,
+                qbraid_shots=args.qbraid_shots,
+            )
+            label = f"{strategy}/{environment}"
+            print(f"\n{'=' * 60}")
+            print(f"  Running: {executor.run_label}")
+            print(f"{'=' * 60}")
 
-    fig.suptitle("Solution Feasibility (satisfies k-cut partition constraint)",
-                 fontweight="bold", fontsize=11)
-    fig.tight_layout()
-    return fig
+            dash.set_current_run(label)
+
+            live_problem = _LiveProblem(
+                problem,
+                on_iteration=dash.record_iteration,
+            )
+
+            result = executor.execute(live_problem, optimizer=optimizer)
+            result["combination"] = label
+            dash.add_result(result)
+
+    dash.finalize()
 
 
-# ── Render ─────────────────────────────────────────────────────────────────────
-if not data:
-    print("No result files found. Run experiments first.")
-else:
-    plt.style.use("dark_background")
-
-    figs = [
-        plot_cost_comparison(data),
-        plot_approximation_ratios(data),
-        plot_elapsed_times(data),
-        plot_hardware_stats(data),
-        plot_feasibility(data),
-    ]
-
-    for fig in figs:
-        if fig is not None:
-            fig.patch.set_facecolor("#0d1117")
-            for ax in fig.get_axes():
-                ax.set_facecolor("#161b22")
-
-    plt.show()
+if __name__ == "__main__":
+    main()
