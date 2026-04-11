@@ -2,13 +2,13 @@
 qBraid Challenge — Compiler-Aware Quantum Benchmarking
 Live matplotlib dashboard.
 
-Runs QAOA MaxCut through the qBraid executor matrix
+Runs QAOA Wildfire Mitigation through the qBraid executor matrix
 (balanced / aggressive) × (clifford / aer) and updates six
 charts in real time as each run completes.
 
 Usage (from repo root, venv active):
     python frontend/visualize.py
-    python frontend/visualize.py --num-nodes 6 --num-qubits 6 --optimizer-maxiter 5
+    python frontend/visualize.py --grid-rows 3 --grid-cols 3 --spsa-maxiter 10
     python frontend/visualize.py --strategies balanced aggressive --environments clifford aer
 """
 from __future__ import annotations
@@ -29,8 +29,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from executors import QBraidExecutor
-from optimizers import ScipyOptimizer
-from problems import MaxCutProblem
+from optimizers import SpsaOptimizer
+from problems import WildfireMitigationProblem
 from problems.base import Problem
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -39,14 +39,15 @@ from problems.base import Problem
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Live qBraid QAOA MaxCut benchmarking dashboard"
+        description="Live qBraid QAOA Wildfire Mitigation benchmarking dashboard"
     )
-    p.add_argument("--num-nodes",          type=int,   default=6)
-    p.add_argument("--num-qubits",         type=int,   default=6)
-    p.add_argument("--graph-probability",  type=float, default=0.5)
-    p.add_argument("--seed",               type=int,   default=42)
-    p.add_argument("--reps",               type=int,   default=1)
-    p.add_argument("--optimizer-maxiter",  type=int,   default=10)
+    p.add_argument("--grid-rows",          type=int,   default=3)
+    p.add_argument("--grid-cols",          type=int,   default=3)
+    p.add_argument("--shrub-budget",       type=int,   default=3)
+    p.add_argument("--brush-probability",  type=float, default=0.7)
+    p.add_argument("--wildfire-seed",      type=int,   default=42)
+    p.add_argument("--layer-reps",         type=int,   default=1)
+    p.add_argument("--spsa-maxiter",       type=int,   default=20)
     p.add_argument("--backend",            default="ibm_rensselaer")
     p.add_argument("--qbraid-shots",       type=int,   default=1024)
     p.add_argument(
@@ -123,7 +124,7 @@ class _Dashboard:
     """Six-panel matplotlib dashboard that updates live after every loss iteration."""
 
     _TITLE = (
-        "qBraid Challenge — Compiler-Aware QAOA MaxCut\n"
+        "qBraid Challenge — Compiler-Aware QAOA Wildfire Mitigation\n"
         "Strategy: balanced (opt-level 1)  vs  aggressive (opt-level 3)"
     )
 
@@ -200,7 +201,7 @@ class _Dashboard:
             cols   = [_run_color(r, i) for i, r in enumerate(rs)]
             bars   = ax.bar(keys, scores, color=cols, edgecolor="white", linewidth=0.4)
             ax.bar_label(bars, fmt="%.2f", padding=3, fontsize=7, color="white")
-        ax.set_title("Output Quality — Cut size / quality score  (↑ better)", fontsize=8, fontweight="bold")
+        ax.set_title("Output Quality — Fire-break score / quality score  (↑ better)", fontsize=8, fontweight="bold")
         ax.set_ylabel("Quality score", fontsize=7)
         ax.tick_params(axis="x", labelsize=7)
         ax.grid(axis="y", alpha=0.25)
@@ -321,17 +322,21 @@ class _Dashboard:
 def main() -> None:
     args = _build_parser().parse_args()
 
-    problem = MaxCutProblem(
-        num_nodes=args.num_nodes,
-        num_qubits=args.num_qubits,
-        graph_probability=args.graph_probability,
-        seed=args.seed,
-        reps=args.reps,
+    problem = WildfireMitigationProblem(
+        grid_rows=args.grid_rows,
+        grid_cols=args.grid_cols,
+        shrub_budget=args.shrub_budget,
+        brush_probability=args.brush_probability,
+        seed=args.wildfire_seed,
+        reps=max(1, args.layer_reps),
     )
-    optimizer = ScipyOptimizer(
-        method="nelder-mead",
-        maxiter=args.optimizer_maxiter,
-        adaptive=False,
+    optimizer = SpsaOptimizer(
+        maxiter=args.spsa_maxiter,
+        learning_rate=0.2,
+        perturbation=0.1,
+        alpha=0.602,
+        gamma=0.101,
+        seed=args.wildfire_seed,
     )
 
     dash = _Dashboard()
