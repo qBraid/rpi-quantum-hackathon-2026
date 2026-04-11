@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from itertools import combinations
+import logging
 from time import time
 from typing import Any
 
@@ -56,12 +57,13 @@ class MaxCutModel:
         num_qubits: int,
         graph_probability: float,
         seed: int,
+        logger: logging.Logger,
     ) -> MaxCutProblemData:
-        print("Creating MaxCut problem with Pauli Correlation Encoding...")
+        logger.info("Creating MaxCut problem with Pauli Correlation Encoding")
         start_problem = time()
 
         graph = rx.undirected_gnp_random_graph(num_nodes, graph_probability, seed=seed)
-        print(f"Graph: {num_nodes} nodes, {len(graph.edges())} edges")
+        logger.info("Graph nodes=%s edges=%s", num_nodes, len(graph.edges()))
 
         list_size = num_nodes // 3
         node_x = [i for i in range(list_size)]
@@ -73,7 +75,7 @@ class MaxCutModel:
         pce_z = cls.build_pauli_correlation_encoding("Z", node_z, num_qubits)
 
         setup_time = time() - start_problem
-        print(f"✓ Problem setup completed in {setup_time:.4f}s\n")
+        logger.info("Problem setup %.4fs", setup_time)
 
         return MaxCutProblemData(
             graph=graph,

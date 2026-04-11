@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from time import time
 from typing import Any, Callable, Self
 
@@ -61,19 +62,23 @@ class MaxCutProblem(Problem):
             reps=args.reps,
         )
 
-    def build_problem_data(self) -> MaxCutProblemData:
+    def build_problem_data(self, *, logger: logging.Logger) -> MaxCutProblemData:
         return MaxCutModel.build_problem_data(
             num_nodes=self.num_nodes,
             num_qubits=self.num_qubits,
             graph_probability=self.graph_probability,
             seed=self.seed,
+            logger=logger,
         )
 
-    def build_ansatz(self) -> QuantumCircuit:
-        print("Building quantum circuit...")
+    def build_ansatz(self, *, logger: logging.Logger) -> QuantumCircuit:
+        logger.info("Building quantum circuit")
         qc = efficient_su2(self.num_qubits, ["ry", "rz"], reps=self.reps)
-        print(
-            f"Circuit: {self.num_qubits} qubits, {qc.num_parameters} parameters, depth {qc.depth()}"
+        logger.info(
+            "Circuit qubits=%s params=%s depth=%s",
+            self.num_qubits,
+            qc.num_parameters,
+            qc.depth(),
         )
         return qc
 
@@ -98,6 +103,7 @@ class MaxCutProblem(Problem):
         evaluator: ParameterEvaluator,
         experiment_results: list[dict[str, Any]],
         iteration_times: list[float],
+        logger: logging.Logger,
     ) -> Callable[[np.ndarray], float]:
         def loss_func_estimator(x: np.ndarray) -> float:
             iter_start = time()
@@ -125,8 +131,11 @@ class MaxCutProblem(Problem):
 
             iter_time = time() - iter_start
             iteration_times.append(iter_time)
-            print(
-                f"  Iteration {len(experiment_results):3d} | Loss: {loss:10.6f} | Time: {iter_time:.4f}s"
+            logger.info(
+                "Iteration %3d loss=%10.6f time=%.4fs",
+                len(experiment_results),
+                loss,
+                iter_time,
             )
             experiment_results.append({"loss": loss, "exp_map": node_exp_map})
             return loss

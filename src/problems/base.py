@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser, Namespace
+import logging
 from typing import Any, Callable, Protocol, Self
 
 import numpy as np
@@ -25,11 +26,11 @@ class Problem(CliArgumentProvider, ABC):
         """Build a problem instance from parsed CLI arguments."""
 
     @abstractmethod
-    def build_problem_data(self) -> Any:
+    def build_problem_data(self, *, logger: logging.Logger) -> Any:
         """Prepare runtime-independent problem data."""
 
     @abstractmethod
-    def build_ansatz(self) -> Any:
+    def build_ansatz(self, *, logger: logging.Logger) -> Any:
         """Construct the problem ansatz circuit."""
 
     @abstractmethod
@@ -44,6 +45,7 @@ class Problem(CliArgumentProvider, ABC):
         evaluator: ParameterEvaluator,
         experiment_results: list[dict[str, Any]],
         iteration_times: list[float],
+        logger: logging.Logger,
     ) -> Callable[[np.ndarray], float]:
         """Create the optimization objective using an injected evaluator."""
 

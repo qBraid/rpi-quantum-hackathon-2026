@@ -4,7 +4,7 @@ This project benchmarks a MaxCut-style optimization workflow with a dependency-i
 
 - `src/problems/maxcut.py` contains the Max-Cut problem implementation
 - `src/problems/maxcut_model.py` contains extracted Max-Cut domain/model logic
-- `src/executors/qiskit_executor.py` contains the original Qiskit runtime executor
+- `src/executors/qiskit_executor.py` contains the Qiskit runtime executor
 - `src/executors/qbraid_executor.py` contains the qBraid-focused executor (still using Qiskit providers/environments)
 - `src/main.py` owns matrix orchestration and cross-combination benchmark comparison logic
 
@@ -12,30 +12,100 @@ The benchmark supports three runtime modes:
 
 - `hardware`: run on a real IBM Quantum backend
 - `aer`: run on an Aer simulator seeded from an IBM backend configuration
-- `clifford`: run locally on the Aer stabilizer simulator using Clifford-compatible parameter snapping
+- `clifford`: run locally on the Aer stabilizer simulator
 
-## Usage
+## Quickstart (uv)
 
-Run the default executor (`qiskit`) directly:
-
-```bash
-python src/main.py --mode aer
-```
-
-Examples:
+### 1) Clone and enter the project
 
 ```bash
-python src/main.py --mode hardware --backend ibm_rensselaer
-python src/main.py --mode aer --backend ibm_rensselaer
-python src/main.py --mode clifford --num-nodes 120 --reps 3
-python src/main.py --executor qbraid --qbraid-strategy aggressive --qbraid-environment aer --num-nodes 60
-python src/main.py --run-matrix --benchmark-executors qbraid --benchmark-qbraid-strategies balanced aggressive --benchmark-qbraid-environments aer clifford --num-nodes 60
-python src/main.py --run-matrix --benchmark-executors qiskit qbraid --benchmark-qiskit-modes clifford --benchmark-qbraid-strategies balanced aggressive --benchmark-qbraid-environments aer clifford --num-nodes 60
+git clone <your-repo-url>
+cd quantum_hackathon
 ```
+
+### 2) Ensure `uv` is installed
+
+```bash
+uv --version
+```
+
+### 3) Create/sync the virtual environment from lockfile
+
+```bash
+uv sync
+```
+
+This creates `.venv` (if needed) and installs dependencies from `uv.lock`.
+
+### 4) (Optional) Activate the venv manually
+
+If you prefer an activated shell instead of `uv run`:
+
+```bash
+source .venv/bin/activate
+```
+
+### 5) Configure IBM Runtime credentials
+
+Create a `.env` file in the project root for `hardware` and `aer` flows:
+
+```bash
+cat > .env <<'EOF'
+QISKIT_IBM_CHANNEL=ibm_cloud
+QISKIT_IBM_TOKEN=your_token_here
+QISKIT_IBM_URL=https://cloud.ibm.com
+QISKIT_IBM_INSTANCE=your_crn_or_service_name
+EOF
+```
+
+`clifford` mode does not require IBM credentials.
+
+### 6) Verify CLI wiring
+
+```bash
+uv run python src/main.py --help
+```
+
+## Running Benchmarks
+
+### Single-run examples
+
+```bash
+uv run python src/main.py --executor qiskit --mode clifford --num-nodes 60
+uv run python src/main.py --executor qiskit --mode aer --backend ibm_rensselaer --num-nodes 60
+uv run python src/main.py --executor qbraid --qbraid-strategy aggressive --qbraid-environment aer --num-nodes 60
+```
+
+### qBraid comparison matrix (recommended)
+
+Compare at least two compile strategies across at least two environments:
+
+```bash
+uv run python src/main.py \
+  --run-matrix \
+  --benchmark-executors qbraid \
+  --benchmark-qbraid-strategies balanced aggressive \
+  --benchmark-qbraid-environments aer clifford \
+  --num-nodes 60 \
+  --num-qubits 10 \
+  --reps 2
+```
+
+### Mixed qiskit + qbraid matrix
+
+```bash
+uv run python src/main.py \
+  --run-matrix \
+  --benchmark-executors qiskit qbraid \
+  --benchmark-qiskit-modes clifford \
+  --benchmark-qbraid-strategies balanced aggressive \
+  --benchmark-qbraid-environments aer clifford \
+  --num-nodes 60
+```
+
+Note: mixed matrices still run and list all combinations. Topic-based benchmark comparison is only performed when all combinations expose the same `benchmark_topics` set.
 
 ## Options
-
-The CLI merges problem and executor options into one parser:
 
 - Global options
   - `--problem`: selects the problem implementation (`maxcut`)
@@ -49,35 +119,25 @@ The CLI merges problem and executor options into one parser:
   - `--graph-probability`: random graph edge probability
   - `--seed`: random seed
   - `--reps`: ansatz repetitions
-- Executor options
-  - `--mode`: selects the execution backend
+
+- Qiskit executor options
+  - `--mode`: execution backend (`hardware`, `aer`, `clifford`)
   - `--backend`: IBM backend name used for `hardware` and `aer`
   - `--maxiter`: COBYLA iteration limit
 
-When `--executor qbraid` is selected, qBraid-specific options are available:
+- qBraid executor options
+  - `--qbraid-strategy`: single-run strategy (`balanced`, `aggressive`)
+  - `--qbraid-environment`: single-run environment (`aer`, `clifford`)
+  - `--benchmark-qbraid-strategies`: matrix strategies
+  - `--benchmark-qbraid-environments`: matrix environments
 
-- `--qbraid-strategy`: compilation strategy for single-run mode (`balanced`, `aggressive`)
-- `--qbraid-environment`: execution environment for single-run mode (`aer`, `clifford`)
+## Logging Behavior
 
-In matrix mode, top-level CLI options expand qBraid combinations:
+Executor internals emit Python `logging` records under terse, configuration-aware logger names, for example:
 
-- `--benchmark-qbraid-strategies`: strategy list to expand
-- `--benchmark-qbraid-environments`: environment list to expand
+- `ex.qk.clifford.<backend>`
+- `ex.qb.aggressive.aer.<backend>`
 
-The framework compares benchmarking metrics only when all selected combinations expose the same `benchmark_topics` set. `qiskit` provides no benchmark topics, so mixed `qiskit + qbraid` matrices still run and list all results, but skip topic-based benchmark comparison.
+CLI summary/status output still uses `print`, so executor logs and top-level CLI output are easy to distinguish.
 
-For topic-compatible combinations, the framework evaluates tradeoffs between:
-
-- output quality (`cut_size` when available, otherwise inverse final loss)
-- compiled resource cost (depth, total ops, 2-qubit ops, transpile time)
-- quality/cost tradeoff score (`quality_score / compiled_resource_cost`)
-
-## Notes
-
-- `hardware` and `aer` modes require IBM Quantum credentials to be available through your saved account or `.env` configuration.
-- `qiskit-ibm-runtime` can load an account from environment variables. Set:
-  - `QISKIT_IBM_CHANNEL` (`ibm_cloud` or `ibm_quantum_platform`)
-  - `QISKIT_IBM_TOKEN` (IBM Cloud API key)
-  - `QISKIT_IBM_INSTANCE` (CRN or service name)
-- `clifford` mode does not require IBM credentials.
-- The Clifford mode snaps parameters to multiples of `pi/2` so the stabilizer simulator can evaluate the circuit.
+When stderr is a TTY, executor log messages are colorized by log level.

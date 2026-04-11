@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from time import time
 from typing import Any, Callable, Self, cast
@@ -11,7 +12,7 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from qiskit_ibm_runtime import QiskitRuntimeService
 
-from executors.base import Executor
+from executors.base import Executor, get_executor_logger
 from problems.base import ParameterEvaluator, Problem
 
 
@@ -58,6 +59,13 @@ class QiskitExecutor(Executor):
         return f"qiskit(mode={self.mode}, backend={self.backend_name})"
 
     @property
+    def logger_name(self) -> str:
+        return f"ex.qk.{self.mode}.{self.backend_name}"
+
+    def _logger(self) -> logging.Logger:
+        return get_executor_logger(self.logger_name)
+
+    @property
     def benchmark_topics(self) -> set[str]:
         # Legacy executor path does not provide normalized benchmark metrics.
         return set()
@@ -69,6 +77,7 @@ class QiskitExecutor(Executor):
         return np.round(params / step) * step
 
     def _build_runtime(self) -> RuntimeBundle:
+        logger = self._logger()
         if self.mode in {"hardware", "aer"}:
             load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
             try:
@@ -81,6 +90,7 @@ class QiskitExecutor(Executor):
 
             backend = service.backend(self.backend_name)
             if self.mode == "hardware":
+                logger.info("Using IBM hardware backend runtime mode")
                 return RuntimeBundle(
                     label=f"IBM hardware backend '{self.backend_name}'",
                     transpile_backend=backend,
@@ -89,6 +99,7 @@ class QiskitExecutor(Executor):
                 )
 
             simulator = AerSimulator.from_backend(backend)
+            logger.info("Using Aer simulator seeded from IBM backend")
             return RuntimeBundle(
                 label=f"Aer simulator seeded from '{self.backend_name}'",
                 transpile_backend=simulator,
@@ -97,6 +108,7 @@ class QiskitExecutor(Executor):
             )
 
         simulator = AerSimulator(method="stabilizer")  # type: ignore[arg-type]
+        logger.info("Using local Clifford stabilizer simulation runtime mode")
         return RuntimeBundle(
             label="Clifford stabilizer simulation",
             transpile_backend=simulator,
@@ -133,27 +145,36 @@ class QiskitExecutor(Executor):
         return evaluate
 
     def execute(self, problem: Problem) -> dict[str, Any]:
-        print(f"Selected mode: {self.mode}")
+        logger = self._logger()
+        logger.info("Start mode=%s", self.mode)
         start_setup = time()
         runtime = self._build_runtime()
         setup_time = time() - start_setup
-        print(f"✓ Runtime setup completed in {setup_time:.4f}s ({runtime.label})\n")
+        logger.info("Setup %.4fs (%s)", setup_time, runtime.label)
 
-        problem_data = problem.build_problem_data()
+        problem_data = problem.build_problem_data(logger=logger)
 
-        print("Building and optimizing quantum circuit...")
+        logger.info("Build and optimize circuit")
         start_circuit = time()
-        ansatz = problem.build_ansatz()
+        ansatz = problem.build_ansatz(logger=logger)
         pm = generate_preset_pass_manager(
             backend=runtime.transpile_backend, optimization_level=3
         )
         qc_optimized = pm.run(ansatz)
-        print(
-            f"Optimized circuit: {qc_optimized.num_qubits} qubits, "
-            f"{qc_optimized.num_parameters} parameters, depth {qc_optimized.depth()}"
+        logger.debug(
+            "Circuit transpiled: qubits=%s params=%s depth=%s",
+            qc_optimized.num_qubits,
+            qc_optimized.num_parameters,
+            qc_optimized.depth(),
+        )
+        logger.info(
+            "Optimized circuit qubits=%s params=%s depth=%s",
+            qc_optimized.num_qubits,
+            qc_optimized.num_parameters,
+            qc_optimized.depth(),
         )
         circuit_time = time() - start_circuit
-        print(f"✓ Circuit optimization completed in {circuit_time:.4f}s\n")
+        logger.info("Circuit optimization %.4fs", circuit_time)
 
         observables = problem.build_observables(qc_optimized.layout, problem_data)
         estimator = Estimator(mode=runtime.estimator_mode)
@@ -169,6 +190,7 @@ class QiskitExecutor(Executor):
             ),
             experiment_results=experiment_results,
             iteration_times=iteration_times,
+            logger=logger,
         )
 
         seed = getattr(problem_data, "seed", 42)
@@ -179,12 +201,14 @@ class QiskitExecutor(Executor):
         cobyla_miniter = num_parameters + 2
         cobyla_maxiter = max(self.maxiter, cobyla_miniter)
         if cobyla_maxiter != self.maxiter:
-            print(
-                f"Requested COBYLA maxiter={self.maxiter} is below the solver minimum "
-                f"for {num_parameters} parameters; using {cobyla_maxiter} instead."
+            logger.info(
+                "Adjusted COBYLA maxiter from %s to %s for %s parameters",
+                self.maxiter,
+                cobyla_maxiter,
+                num_parameters,
             )
 
-        print(f"Starting optimization on {runtime.label}...")
+        logger.info("Optimize on %s", runtime.label)
         start_optimization = time()
         objective: Callable[..., Any] = loss_func
         minimize_fn: Callable[..., Any] = cast(Any, minimize)
@@ -196,33 +220,29 @@ class QiskitExecutor(Executor):
             options={"maxiter": cobyla_maxiter},
         )
         optimization_time = time() - start_optimization
-        print(f"\n✓ Optimization completed in {optimization_time:.4f}s\n")
+        logger.info("Optimization %.4fs", optimization_time)
 
         postprocess = problem.postprocess(
             problem_data=problem_data, experiment_results=experiment_results
         )
         cut_size = postprocess["cut_size"]
-        print(f"Final cut size: {cut_size}")
-        print(f"Optimization result:\n{result}\n")
+        logger.info("Result cut=%s objective=%s", cut_size, result.fun)
 
         average_iteration_time = float(np.mean(iteration_times)) if iteration_times else 0.0
         min_iteration_time = float(np.min(iteration_times)) if iteration_times else 0.0
         max_iteration_time = float(np.max(iteration_times)) if iteration_times else 0.0
 
-        print("=" * 70)
-        print("BENCHMARKING SUMMARY")
-        print("=" * 70)
-        print(f"Setup time (runtime creation):         {setup_time:10.4f}s")
-        print(f"Problem setup time:                    {problem_data.setup_time:10.4f}s")
-        print(f"Circuit setup & optimization time:     {circuit_time:10.4f}s")
-        print(f"Optimization loop time:                {optimization_time:10.4f}s")
-        print(f"  - Average time per iteration:        {average_iteration_time:10.4f}s")
-        print(f"  - Min iteration time:                {min_iteration_time:10.4f}s")
-        print(f"  - Max iteration time:                {max_iteration_time:10.4f}s")
-        print(
-            f"Total runtime:                         {setup_time + problem_data.setup_time + circuit_time + optimization_time:10.4f}s"
+        logger.info(
+            "Timing setup=%.4fs problem=%.4fs circuit=%.4fs optimize=%.4fs iter(avg/min/max)=%.4f/%.4f/%.4f total=%.4fs",
+            setup_time,
+            problem_data.setup_time,
+            circuit_time,
+            optimization_time,
+            average_iteration_time,
+            min_iteration_time,
+            max_iteration_time,
+            setup_time + problem_data.setup_time + circuit_time + optimization_time,
         )
-        print("=" * 70)
 
         return {
             "executor": "qiskit",

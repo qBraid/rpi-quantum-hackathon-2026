@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from time import time
 from typing import Any, Callable, Self, cast
@@ -11,7 +12,7 @@ from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from qiskit_ibm_runtime import QiskitRuntimeService
 from scipy.optimize import minimize
 
-from executors.base import Executor
+from executors.base import Executor, get_executor_logger
 from problems.base import ParameterEvaluator, Problem
 
 
@@ -80,6 +81,13 @@ class QBraidExecutor(Executor):
         )
 
     @property
+    def logger_name(self) -> str:
+        return f"ex.qb.{self.strategy}.{self.environment}.{self.backend_name}"
+
+    def _logger(self) -> logging.Logger:
+        return get_executor_logger(self.logger_name)
+
+    @property
     def benchmark_topics(self) -> set[str]:
         return {"quality_score", "compiled_resource_cost", "tradeoff_score"}
 
@@ -90,14 +98,19 @@ class QBraidExecutor(Executor):
         return np.round(params / step) * step
 
     def _build_environment(self, name: str) -> ExecutionEnvironment:
+        logger = self._logger()
         if name == "aer":
             load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
             try:
                 service = QiskitRuntimeService()
                 backend = service.backend(self.backend_name)
                 simulator = AerSimulator.from_backend(backend)
+                logger.info("Using Aer simulator seeded from IBM backend")
             except Exception:
                 simulator = AerSimulator()
+                logger.warning(
+                    "IBM backend unavailable for Aer seeding; using default local Aer simulator"
+                )
             return ExecutionEnvironment(
                 name="aer",
                 transpile_backend=simulator,
@@ -106,6 +119,7 @@ class QBraidExecutor(Executor):
             )
 
         simulator = AerSimulator(method="stabilizer")  # type: ignore[arg-type]
+        logger.info("Using local Clifford stabilizer simulation environment")
         return ExecutionEnvironment(
             name="clifford",
             transpile_backend=simulator,
@@ -174,6 +188,7 @@ class QBraidExecutor(Executor):
         circuit,
         strategy: CompilationStrategy,
         transpile_backend: Any,
+        logger: logging.Logger,
     ) -> tuple[Any, bool, float]:
         start = time()
         qbraid_used = False
@@ -188,6 +203,7 @@ class QBraidExecutor(Executor):
                 optimization_level=strategy.optimization_level,
             )
             qbraid_used = True
+            logger.info("Compiled circuit with qBraid transpiler")
         except Exception:
             pm_options: dict[str, Any] = {
                 "backend": transpile_backend,
@@ -197,20 +213,31 @@ class QBraidExecutor(Executor):
                 pm_options["routing_method"] = strategy.routing_method
             pm = generate_preset_pass_manager(**pm_options)
             compiled = pm.run(circuit)
+            logger.warning("qBraid transpilation unavailable; fell back to Qiskit transpilation")
 
         return compiled, qbraid_used, time() - start
 
     def execute(self, problem: Problem) -> dict[str, Any]:
-        print(f"Selected executor run: {self.run_label}")
-        problem_data = problem.build_problem_data()
+        logger = self._logger()
+        logger.info("Start %s", self.run_label)
+        problem_data = problem.build_problem_data(logger=logger)
         strategy = self._strategy_by_name(self.strategy)
         environment = self._build_environment(self.environment)
 
-        ansatz = problem.build_ansatz()
+        ansatz = problem.build_ansatz(logger=logger)
         compiled, qbraid_used, transpile_time = self._compile_with_qbraid_or_qiskit(
             circuit=ansatz,
             strategy=strategy,
             transpile_backend=environment.transpile_backend,
+            logger=logger,
+        )
+        logger.debug(
+            "Circuit compiled: strategy=%s environment=%s depth=%s size=%s two_qubit_ops=%s",
+            strategy.name,
+            environment.name,
+            compiled.depth(),
+            compiled.size(),
+            compiled.num_nonlocal_gates(),
         )
 
         metrics = RuntimeMetrics(
@@ -234,6 +261,7 @@ class QBraidExecutor(Executor):
             ),
             experiment_results=experiment_results,
             iteration_times=iteration_times,
+            logger=logger,
         )
         objective: Callable[..., Any] = loss_func
 
@@ -263,12 +291,22 @@ class QBraidExecutor(Executor):
         quality_score = self._quality_score(cut_size=cut_size, final_loss=final_loss)
         compiled_resource_cost = self._calc_compiled_resource_cost(metrics)
         tradeoff_score = quality_score / max(compiled_resource_cost, 1e-9)
+        logger.info(
+            "Run complete: cut_size=%s final_loss=%.6f cost=%.3f tradeoff=%.5f",
+            cut_size,
+            final_loss,
+            compiled_resource_cost,
+            tradeoff_score,
+        )
 
-        print(
-            "  "
-            f"cut={cut_size} loss={final_loss:.6f} depth={metrics.depth} "
-            f"twoq={metrics.two_qubit_ops} cost={compiled_resource_cost:.3f} "
-            f"tradeoff={tradeoff_score:.5f}"
+        logger.info(
+            "Summary cut=%s loss=%.6f depth=%s twoq=%s cost=%.3f tradeoff=%.5f",
+            cut_size,
+            final_loss,
+            metrics.depth,
+            metrics.two_qubit_ops,
+            compiled_resource_cost,
+            tradeoff_score,
         )
 
         return {
