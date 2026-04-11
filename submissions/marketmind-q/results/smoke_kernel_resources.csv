@@ -1,0 +1,2 @@
+model,execution_mode,train_size,feature_dim,split_id,cutoff_date,qubits,kernel_circuit_depth,kernel_two_qubit_gates,shots,selected_features
+quantum_kernel_svm,statevector_exact,40,2,split_00_train_40,2023-01-03,2,22,6,,"vol_5d,vol_20d"

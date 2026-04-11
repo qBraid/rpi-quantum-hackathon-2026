@@ -1,0 +1,16 @@
+{
+  "dataset_path": "data/marketmind_qml_dataset.csv",
+  "metrics_path": "results/smoke_metrics_summary.csv",
+  "resources_path": "results/smoke_kernel_resources.csv",
+  "figures_dir": "results/smoke_figures",
+  "summary_path": "results/smoke_results_summary.md",
+  "tickers": ["XLF", "XLK"],
+  "train_sizes": [40],
+  "feature_dims": [2],
+  "test_days": 20,
+  "cutoffs": ["2023-01-03"],
+  "quantum_modes": ["statevector_exact"],
+  "run_classical": true,
+  "run_quantum": true
+}
+

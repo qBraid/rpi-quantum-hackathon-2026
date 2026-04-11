@@ -1,0 +1,29 @@
+{
+  "dataset_path": "data/marketmind_qml_dataset.csv",
+  "metrics_path": "results/metrics_summary.csv",
+  "resources_path": "results/kernel_resources.csv",
+  "figures_dir": "results/figures",
+  "summary_path": "results/results_summary.md",
+  "tickers": ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"],
+  "train_sizes": [40, 80, 160, 320],
+  "feature_dims": [2, 4],
+  "test_days": 20,
+  "cutoffs": [
+    "2023-01-03",
+    "2023-04-03",
+    "2023-07-03",
+    "2023-10-02",
+    "2024-01-02",
+    "2024-04-01",
+    "2024-07-01",
+    "2024-10-01",
+    "2025-01-02",
+    "2025-04-01",
+    "2025-07-01",
+    "2025-10-01"
+  ],
+  "quantum_modes": ["statevector_exact", "shots_1024", "noisy_1024"],
+  "run_classical": true,
+  "run_quantum": true
+}
+
