@@ -56,7 +56,7 @@ class QBraidExecutor(Executor):
         )
         parser.add_argument(
             "--qbraid-environment",
-            choices=("aer", "clifford"),
+            choices=("hardware", "aer", "clifford"),
             default="aer",
             help="Execution environment for a single qBraid run.",
         )
@@ -99,6 +99,25 @@ class QBraidExecutor(Executor):
 
     def _build_environment(self, name: str) -> ExecutionEnvironment:
         logger = self._logger()
+        if name == "hardware":
+            load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
+            try:
+                service = QiskitRuntimeService()
+                backend = service.backend(self.backend_name)
+            except Exception as exc:  # pragma: no cover - runtime environment dependent
+                raise RuntimeError(
+                    "IBM Runtime service initialization failed for qBraid hardware mode. "
+                    "Set up your IBM Quantum credentials before using hardware."
+                ) from exc
+
+            logger.info("Using IBM hardware backend environment")
+            return ExecutionEnvironment(
+                name="hardware",
+                transpile_backend=backend,
+                estimator_mode=backend,
+                parameter_transform=lambda params: np.asarray(params, dtype=float),
+            )
+
         if name == "aer":
             load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
             try:

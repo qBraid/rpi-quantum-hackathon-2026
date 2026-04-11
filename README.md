@@ -73,6 +73,7 @@ uv run python src/main.py --help
 ```bash
 uv run python src/main.py --executor qiskit --mode clifford --num-nodes 60
 uv run python src/main.py --executor qiskit --mode aer --backend ibm_rensselaer --num-nodes 60
+uv run python src/main.py --executor qbraid --qbraid-strategy balanced --qbraid-environment hardware --backend ibm_rensselaer --num-nodes 60
 uv run python src/main.py --executor qbraid --qbraid-strategy aggressive --qbraid-environment aer --num-nodes 60
 ```
 
@@ -85,7 +86,7 @@ uv run python src/main.py \
   --run-matrix \
   --benchmark-executors qbraid \
   --benchmark-qbraid-strategies balanced aggressive \
-  --benchmark-qbraid-environments aer clifford \
+  --benchmark-qbraid-environments hardware aer clifford \
   --num-nodes 60 \
   --num-qubits 10 \
   --reps 2
@@ -99,7 +100,7 @@ uv run python src/main.py \
   --benchmark-executors qiskit qbraid \
   --benchmark-qiskit-modes clifford \
   --benchmark-qbraid-strategies balanced aggressive \
-  --benchmark-qbraid-environments aer clifford \
+  --benchmark-qbraid-environments hardware aer clifford \
   --num-nodes 60
 ```
 
@@ -127,7 +128,7 @@ Note: mixed matrices still run and list all combinations. Topic-based benchmark 
 
 - qBraid executor options
   - `--qbraid-strategy`: single-run strategy (`balanced`, `aggressive`)
-  - `--qbraid-environment`: single-run environment (`aer`, `clifford`)
+  - `--qbraid-environment`: single-run environment (`hardware`, `aer`, `clifford`)
   - `--benchmark-qbraid-strategies`: matrix strategies
   - `--benchmark-qbraid-environments`: matrix environments
 
