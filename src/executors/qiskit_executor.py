@@ -1,9 +1,7 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 from time import time
-from typing import Any, Callable
+from typing import Any, Callable, Self
 
 import numpy as np
 from dotenv import load_dotenv
@@ -52,7 +50,7 @@ class QiskitExecutor(Executor):
         )
 
     @classmethod
-    def from_namespace(cls, args) -> QiskitExecutor:
+    def from_namespace(cls, args) -> Self:
         return cls(mode=args.mode, backend_name=args.backend, maxiter=args.maxiter)
 
     @staticmethod

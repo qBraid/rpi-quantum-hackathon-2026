@@ -1,27 +1,13 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
-from itertools import combinations
 from time import time
-from typing import Any, Callable
+from typing import Any, Callable, Self
 
 import numpy as np
-import rustworkx as rx
 from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.library import efficient_su2
-from qiskit.quantum_info import SparsePauliOp
 
 from problems.base import ParameterEvaluator, Problem
-
-
-@dataclass(frozen=True)
-class MaxCutProblemData:
-    graph: Any
-    pce_x: list[SparsePauliOp]
-    pce_y: list[SparsePauliOp]
-    pce_z: list[SparsePauliOp]
-    setup_time: float
-    seed: int
+from problems.maxcut_model import MaxCutModel, MaxCutProblemData
 
 
 @dataclass(frozen=True)
@@ -66,7 +52,7 @@ class MaxCutProblem(Problem):
         )
 
     @classmethod
-    def from_namespace(cls, args) -> MaxCutProblem:
+    def from_namespace(cls, args) -> Self:
         return cls(
             num_nodes=args.num_nodes,
             num_qubits=args.num_qubits,
@@ -75,61 +61,11 @@ class MaxCutProblem(Problem):
             reps=args.reps,
         )
 
-    @staticmethod
-    def _calc_cut_size(graph, partition0, partition1):
-        cut_size = 0
-        for edge0, edge1 in graph.edge_list():
-            if edge0 in partition0 and edge1 in partition1:
-                cut_size += 1
-            elif edge0 in partition1 and edge1 in partition0:
-                cut_size += 1
-        return cut_size
-
-    @staticmethod
-    def _build_pauli_correlation_encoding(
-        pauli: str, node_list: list[int], n: int, k: int = 2
-    ) -> list[SparsePauliOp]:
-        pauli_correlation_encoding = []
-        for idx, c in enumerate(combinations(range(n), k)):
-            if idx >= len(node_list):
-                break
-            paulis = ["I"] * n
-            paulis[c[0]], paulis[c[1]] = pauli, pauli
-            pauli_correlation_encoding.append(("".join(paulis)[::-1], 1))
-
-        hamiltonian = []
-        for pauli_label, weight in pauli_correlation_encoding:
-            hamiltonian.append(SparsePauliOp.from_list([(pauli_label, weight)]))
-
-        return hamiltonian
-
     def build_problem_data(self) -> MaxCutProblemData:
-        print("Creating MaxCut problem with Pauli Correlation Encoding...")
-        start_problem = time()
-
-        graph = rx.undirected_gnp_random_graph(
-            self.num_nodes, self.graph_probability, seed=self.seed
-        )
-        print(f"Graph: {self.num_nodes} nodes, {len(graph.edges())} edges")
-
-        list_size = self.num_nodes // 3
-        node_x = [i for i in range(list_size)]
-        node_y = [i for i in range(list_size, 2 * list_size)]
-        node_z = [i for i in range(2 * list_size, self.num_nodes)]
-
-        pce_x = self._build_pauli_correlation_encoding("X", node_x, self.num_qubits)
-        pce_y = self._build_pauli_correlation_encoding("Y", node_y, self.num_qubits)
-        pce_z = self._build_pauli_correlation_encoding("Z", node_z, self.num_qubits)
-
-        setup_time = time() - start_problem
-        print(f"✓ Problem setup completed in {setup_time:.4f}s\n")
-
-        return MaxCutProblemData(
-            graph=graph,
-            pce_x=pce_x,
-            pce_y=pce_y,
-            pce_z=pce_z,
-            setup_time=setup_time,
+        return MaxCutModel.build_problem_data(
+            num_nodes=self.num_nodes,
+            num_qubits=self.num_qubits,
+            graph_probability=self.graph_probability,
             seed=self.seed,
         )
 
@@ -141,7 +77,7 @@ class MaxCutProblem(Problem):
         )
         return qc
 
-    def build_observables(self, layout: Any, problem_data: Any) -> list[list[SparsePauliOp]]:
+    def build_observables(self, layout: Any, problem_data: Any) -> list[list[Any]]:
         if layout is None:
             return [
                 list(problem_data.pce_x),
@@ -204,14 +140,8 @@ class MaxCutProblem(Problem):
             raise RuntimeError("Optimization completed without producing any iterations.")
 
         final_exp_map = experiment_results[-1]["exp_map"]
-        par0, par1 = set(), set()
-        for i in final_exp_map:
-            if final_exp_map[i] >= 0:
-                par0.add(i)
-            else:
-                par1.add(i)
-
-        cut_size = self._calc_cut_size(problem_data.graph, par0, par1)
+        par0, par1 = MaxCutModel.build_partitions(final_exp_map)
+        cut_size = MaxCutModel.calc_cut_size(problem_data.graph, par0, par1)
         return {
             "cut_size": cut_size,
             "partition0": sorted(par0),

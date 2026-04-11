@@ -1,12 +1,8 @@
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser, Namespace
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, Self
 
 import numpy as np
-from qiskit.circuit import QuantumCircuit
-from qiskit.quantum_info import SparsePauliOp
 
 
 class ParameterEvaluator(Protocol):
@@ -14,15 +10,18 @@ class ParameterEvaluator(Protocol):
         """Return an expectation-value map for the supplied parameters."""
 
 
-class Problem(ABC):
+class CliArgumentProvider(ABC):
     @classmethod
     @abstractmethod
     def add_cli_arguments(cls, parser: ArgumentParser) -> None:
-        """Register problem-specific CLI arguments."""
+        """Register component-specific CLI arguments."""
+
+
+class Problem(CliArgumentProvider, ABC):
 
     @classmethod
     @abstractmethod
-    def from_namespace(cls, args: Namespace) -> Problem:
+    def from_namespace(cls, args: Namespace) -> Self:
         """Build a problem instance from parsed CLI arguments."""
 
     @abstractmethod
@@ -30,13 +29,11 @@ class Problem(ABC):
         """Prepare runtime-independent problem data."""
 
     @abstractmethod
-    def build_ansatz(self) -> QuantumCircuit:
+    def build_ansatz(self) -> Any:
         """Construct the problem ansatz circuit."""
 
     @abstractmethod
-    def build_observables(
-        self, layout: Any, problem_data: Any
-    ) -> list[list[SparsePauliOp]]:
+    def build_observables(self, layout: Any, problem_data: Any) -> list[list[Any]]:
         """Apply a transpiled layout to the problem observables."""
 
     @abstractmethod
