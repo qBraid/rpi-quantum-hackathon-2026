@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 import logging
+import os
 from pathlib import Path
 from time import time
 from typing import Any, Callable, Self, cast
 
 import numpy as np
 from dotenv import load_dotenv
+from qbraid.runtime import QbraidProvider
 from qiskit_aer import AerSimulator
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
@@ -29,6 +31,7 @@ class ExecutionEnvironment:
     transpile_backend: Any
     estimator_mode: Any
     parameter_transform: Callable[[np.ndarray], np.ndarray]
+    qbraid_device: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,7 @@ class QBraidExecutor(Executor):
     maxiter: int
     strategy: str
     environment: str
+    qbraid_shots: int
 
     @classmethod
     def add_cli_arguments(cls, parser) -> None:
@@ -56,9 +60,15 @@ class QBraidExecutor(Executor):
         )
         parser.add_argument(
             "--qbraid-environment",
-            choices=("hardware", "aer", "clifford"),
+            choices=("hardware", "aer", "clifford", "cloud"),
             default="aer",
             help="Execution environment for a single qBraid run.",
+        )
+        parser.add_argument(
+            "--qbraid-shots",
+            type=int,
+            default=2048,
+            help="Number of shots per circuit evaluation in qBraid cloud mode.",
         )
 
     @classmethod
@@ -68,6 +78,7 @@ class QBraidExecutor(Executor):
             maxiter=args.maxiter,
             strategy=args.qbraid_strategy,
             environment=args.qbraid_environment,
+            qbraid_shots=args.qbraid_shots,
         )
 
     @property
@@ -99,6 +110,31 @@ class QBraidExecutor(Executor):
 
     def _build_environment(self, name: str) -> ExecutionEnvironment:
         logger = self._logger()
+        if name == "cloud":
+            load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
+            api_key = os.getenv("QBRAID_API_KEY")
+            if not api_key:
+                raise RuntimeError(
+                    "qBraid cloud mode requires QBRAID_API_KEY in your environment or .env file."
+                )
+            try:
+                provider = QbraidProvider(api_key=api_key)
+                device = provider.get_device(self.backend_name)
+            except Exception as exc:  # pragma: no cover - runtime environment dependent
+                raise RuntimeError(
+                    "Failed to initialize qBraid cloud device. Verify QBRAID_API_KEY and "
+                    f"the device id passed via --backend (got '{self.backend_name}')."
+                ) from exc
+
+            logger.info("Using qBraid cloud device '%s'", self.backend_name)
+            return ExecutionEnvironment(
+                name="cloud",
+                transpile_backend=None,
+                estimator_mode=None,
+                parameter_transform=lambda params: np.asarray(params, dtype=float),
+                qbraid_device=device,
+            )
+
         if name == "hardware":
             load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
             try:
@@ -157,6 +193,79 @@ class QBraidExecutor(Executor):
             ),
         }
         return mapping[name]
+
+    @staticmethod
+    def _build_basis_measurement_circuit(circuit, basis: str):
+        measured = circuit.copy()
+        for qubit in range(measured.num_qubits):
+            if basis == "x":
+                measured.h(qubit)
+            elif basis == "y":
+                measured.sdg(qubit)
+                measured.h(qubit)
+        measured.measure_all()
+        return measured
+
+    @staticmethod
+    def _counts_expectation_for_op(op: Any, counts: dict[str, int]) -> float:
+        terms = op.to_list()
+        if not terms:
+            return 0.0
+
+        label, coeff = terms[0]
+        active_qubits = [idx for idx, pauli in enumerate(reversed(label)) if pauli != "I"]
+        total = sum(counts.values())
+        if total <= 0:
+            return 0.0
+
+        expectation = 0.0
+        for bitstring, count in counts.items():
+            clean = bitstring.replace(" ", "")
+            parity = 0
+            for qubit in active_qubits:
+                bit = clean[-1 - qubit]
+                parity ^= int(bit)
+            expectation += (-1.0 if parity else 1.0) * float(count)
+
+        expectation /= float(total)
+        return float(np.real(coeff)) * expectation
+
+    @classmethod
+    def _make_qbraid_cloud_evaluator(
+        cls,
+        *,
+        device: Any,
+        ansatz,
+        observables: list[list[Any]],
+        parameter_transform: Callable[[np.ndarray], np.ndarray],
+        shots: int,
+    ) -> ParameterEvaluator:
+        def evaluate(params: np.ndarray) -> dict[int, float]:
+            transformed = parameter_transform(np.asarray(params, dtype=float))
+            bound = ansatz.assign_parameters(transformed, inplace=False)
+            counts_by_basis: dict[str, dict[str, int]] = {}
+
+            for basis in ("x", "y", "z"):
+                measured = cls._build_basis_measurement_circuit(bound, basis)
+                job = device.run(measured, shots=shots)
+                result = job.result()
+                counts_raw = result.data.get_counts()
+                if isinstance(counts_raw, list):
+                    counts = counts_raw[0] if counts_raw else {}
+                else:
+                    counts = counts_raw
+                counts_by_basis[basis] = {str(k): int(v) for k, v in counts.items()}
+
+            node_exp_map: dict[int, float] = {}
+            idx = 0
+            for basis, grouped_ops in zip(("x", "y", "z"), observables, strict=False):
+                basis_counts = counts_by_basis[basis]
+                for op in grouped_ops:
+                    node_exp_map[idx] = cls._counts_expectation_for_op(op, basis_counts)
+                    idx += 1
+            return node_exp_map
+
+        return evaluate
 
     @staticmethod
     def _make_evaluator(
@@ -244,12 +353,18 @@ class QBraidExecutor(Executor):
         environment = self._build_environment(self.environment)
 
         ansatz = problem.build_ansatz(logger=logger)
-        compiled, qbraid_used, transpile_time = self._compile_with_qbraid_or_qiskit(
-            circuit=ansatz,
-            strategy=strategy,
-            transpile_backend=environment.transpile_backend,
-            logger=logger,
-        )
+        if environment.name == "cloud":
+            compiled = ansatz
+            qbraid_used = True
+            transpile_time = 0.0
+            logger.info("Cloud mode uses qBraid device-side compilation/routing")
+        else:
+            compiled, qbraid_used, transpile_time = self._compile_with_qbraid_or_qiskit(
+                circuit=ansatz,
+                strategy=strategy,
+                transpile_backend=environment.transpile_backend,
+                logger=logger,
+            )
         logger.debug(
             "Circuit compiled: strategy=%s environment=%s depth=%s size=%s two_qubit_ops=%s",
             strategy.name,
@@ -266,18 +381,30 @@ class QBraidExecutor(Executor):
             transpile_time=transpile_time,
         )
 
-        observables = problem.build_observables(compiled.layout, problem_data)
-        estimator = Estimator(mode=environment.estimator_mode)
+        observables = problem.build_observables(getattr(compiled, "layout", None), problem_data)
         experiment_results: list[dict[str, Any]] = []
         iteration_times: list[float] = []
-        loss_func = problem.make_loss(
-            problem_data=problem_data,
-            evaluator=self._make_evaluator(
+        if environment.name == "cloud":
+            if environment.qbraid_device is None:
+                raise RuntimeError("qBraid cloud environment is missing a runtime device.")
+            evaluator = self._make_qbraid_cloud_evaluator(
+                device=environment.qbraid_device,
+                ansatz=compiled,
+                observables=observables,
+                parameter_transform=environment.parameter_transform,
+                shots=self.qbraid_shots,
+            )
+        else:
+            estimator = Estimator(mode=environment.estimator_mode)
+            evaluator = self._make_evaluator(
                 estimator=estimator,
                 ansatz=compiled,
                 observables=observables,
                 parameter_transform=environment.parameter_transform,
-            ),
+            )
+        loss_func = problem.make_loss(
+            problem_data=problem_data,
+            evaluator=evaluator,
             experiment_results=experiment_results,
             iteration_times=iteration_times,
             logger=logger,
@@ -335,6 +462,7 @@ class QBraidExecutor(Executor):
             "qbraid_used": qbraid_used,
             "strategy": strategy.name,
             "environment": environment.name,
+            "qbraid_shots": self.qbraid_shots if environment.name == "cloud" else None,
             "final_loss": final_loss,
             "cut_size": cut_size,
             "quality_score": quality_score,

@@ -72,7 +72,7 @@ def build_parser(problem_cls: ProblemType = MaxCutProblem) -> argparse.ArgumentP
     parser.add_argument(
         "--benchmark-qbraid-environments",
         nargs="+",
-        choices=("hardware", "aer", "clifford"),
+        choices=("hardware", "aer", "clifford", "cloud"),
         default=["aer", "clifford"],
         help="qBraid environments to include in matrix mode.",
     )

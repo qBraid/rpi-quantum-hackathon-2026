@@ -41,7 +41,10 @@ class QiskitExecutor(Executor):
         parser.add_argument(
             "--backend",
             default="ibm_rensselaer",
-            help="IBM backend name to use for hardware and Aer-from-hardware modes.",
+            help=(
+                "Backend identifier: IBM backend name for Qiskit hardware/Aer modes, "
+                "or qBraid device id when using qBraid cloud mode."
+            ),
         )
         parser.add_argument(
             "--maxiter",
