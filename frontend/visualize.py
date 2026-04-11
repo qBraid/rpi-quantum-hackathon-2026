@@ -410,7 +410,7 @@ class _Dashboard:
             best   = max(scores) if scores else 1.0
             keys   = [_run_key(r) for r in rs]
             ratios = [s / max(best, 1e-9) for s in scores]
-            cols   = ["#10b981" if v >= 0.99 else _run_color(r, i) for i, (r, v) in enumerate(zip(rs, ratios))]
+            cols   = [_run_color(r, i) for i, r in enumerate(rs)]
             bars   = ax.bar(keys, ratios, color=cols, edgecolor="white", linewidth=0.4)
             ax.bar_label(bars, fmt="%.3f", padding=2, fontsize=7, color="white")
             ax.axhline(1.0, color="#10b981", linestyle="--", linewidth=1, label="best run")
@@ -423,14 +423,18 @@ class _Dashboard:
         # ── 6a. Loss convergence curve ───────────────────────────────────────
         ax = self._ax_loss
         ax.cla(); ax.set_facecolor(_BG)
-        cycle = list(_COMBO_COLORS.values()) + _FALLBACK
         for i, r in enumerate(rs):
             hist = r.get("loss_history", [])
             if hist:
-                ax.plot(hist, color=cycle[i % len(cycle)], linewidth=0.9,
+                ax.plot(hist, color=_run_color(r, i), linewidth=0.9,
                         alpha=0.75, label=_run_key(r))
         if cl:
-            ax.plot(cl, color="#f59e0b", linewidth=1.6,
+            # Use the active run's own color for the live line
+            live_clr = _COMBO_COLORS.get(
+                (lb.split("/")[0], lb.split("/")[-1]) if "/" in lb else ("", ""),
+                "#f59e0b",
+            )
+            ax.plot(cl, color=live_clr, linewidth=1.6,
                     label=f"{lb} (live)" if lb else "current (live)")
         ax.set_title("Optimization Loss Convergence", fontsize=8, fontweight="bold")
         ax.set_xlabel("Iteration", fontsize=7)
@@ -441,13 +445,14 @@ class _Dashboard:
         # ── 6b. Strategy summary scatter ─────────────────────────────────────
         ax = self._ax_strat
         ax.cla(); ax.set_facecolor(_BG)
-        strat_color = {"balanced": "#00d4ff", "aggressive": "#ef4444"}
+        # Pick the first combo color for each strategy to keep it recognisable
+        _strat_first = {"balanced": "#00d4ff", "aggressive": "#f59e0b"}
         for strat in ("balanced", "aggressive"):
             grp = [r for r in rs if r.get("strategy") == strat]
             if grp:
                 aq = float(np.mean([r.get("quality_score", 0.0) for r in grp]))
                 ac = float(np.mean([r.get("compiled_resource_cost", 0.0) for r in grp]))
-                color = strat_color.get(strat, "#8b5cf6")
+                color = _strat_first.get(strat, "#8b5cf6")
                 ax.scatter(ac, aq, s=130, color=color, edgecolors="white",
                            linewidths=0.8, zorder=5)
                 ax.annotate(
