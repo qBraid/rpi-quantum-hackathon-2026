@@ -5,11 +5,10 @@ from typing import Any, Callable, Self
 
 import numpy as np
 from qiskit.circuit import ParameterVector, QuantumCircuit
-from GPTCircuitImproved import GridQuantumCircuit
 
 from problems.base import ParameterEvaluator, Problem, format_float, format_float_list
 
-from .model import WildfireModel, WildfireProblemData
+from .model import WildfireModel, WildfireProblemData, build_random_grid
 
 
 @dataclass(frozen=True)
@@ -81,22 +80,25 @@ class WildfireMitigationProblem(Problem):
         )
 
     def build_ansatz(self, *, logger: logging.Logger) -> QuantumCircuit:
-        logger.info("Building wildfire circuit via GPTCircuitImproved.GridQuantumCircuit")
+        logger.info(
+            "Building wildfire circuit via Grid.BuildQuantumCircuit (random graph seed=%s)",
+            self.seed,
+        )
         gamma = ParameterVector("gamma", self.reps)
         beta = ParameterVector("beta", self.reps)
-        num_qubits = self.grid_rows * self.grid_cols
-        max_active = max(0, min(self.shrub_budget, num_qubits))
-        qc = GridQuantumCircuit(
-            gamma=list(gamma),
-            beta=list(beta),
+        grid = build_random_grid(
             grid_size=(self.grid_rows, self.grid_cols),
-            max_active=max_active,
+            brush_probability=self.brush_probability,
+            shrub_budget=self.shrub_budget,
+            seed=self.seed,
         )
+        qc = grid.BuildQuantumCircuit(list(gamma), list(beta))
         logger.info(
-            "Circuit qubits=%s params=%s depth=%s",
+            "Circuit qubits=%s params=%s depth=%s seed=%s",
             qc.num_qubits,
             qc.num_parameters,
             qc.depth(),
+            self.seed,
         )
         return qc
 
@@ -144,8 +146,9 @@ class WildfireMitigationProblem(Problem):
         iteration_times: list[float],
         logger: logging.Logger,
     ) -> Callable[[np.ndarray], float]:
-        num_qubits = self.grid_rows * self.grid_cols
+        num_qubits = problem_data.num_qubits
         shrub_budget = self.shrub_budget
+        logger.info("Wildfire optimization using random graph seed=%s", problem_data.seed)
 
         def loss_func_estimator(x: np.ndarray) -> float:
             iter_start = time()
@@ -183,16 +186,15 @@ class WildfireMitigationProblem(Problem):
             raise RuntimeError("Optimization completed without producing any iterations.")
 
         final_exp_map = experiment_results[-1]["exp_map"]
-        num_qubits = self.grid_rows * self.grid_cols
+        num_qubits = problem_data.num_qubits
         selected_sites = WildfireModel.choose_shrub_sites(
             final_exp_map, self.shrub_budget, num_qubits
         )
         fire_break_score = WildfireModel.calc_fire_break_score(
             problem_data.graph, selected_sites, problem_data.edge_weights
         )
-        selected_cells = [
-            (idx // self.grid_cols, idx % self.grid_cols) for idx in sorted(selected_sites)
-        ]
+        bushes = problem_data.grid.bushes
+        selected_cells = [bushes[idx] for idx in sorted(selected_sites)]
         cut_size = int(round(fire_break_score))
 
         return {

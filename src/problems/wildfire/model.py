@@ -7,9 +7,28 @@ import numpy as np
 import rustworkx as rx
 from qiskit.quantum_info import SparsePauliOp
 
+from Grid import Grid
+
 
 def _cell_index(row: int, col: int, cols: int) -> int:
     return row * cols + col
+
+
+def build_random_grid(
+    *,
+    grid_size: tuple[int, int],
+    brush_probability: float,
+    shrub_budget: int,
+    seed: int,
+) -> Grid:
+    """Deterministically construct a random Grid of bushes for the given seed."""
+    rows, cols = grid_size
+    rng = np.random.default_rng(seed)
+    fuel_mask = rng.random((rows, cols)) < brush_probability
+    bushes = [(int(r), int(c)) for r in range(rows) for c in range(cols) if fuel_mask[r, c]]
+    if not bushes:
+        bushes = [(0, 0)]
+    return Grid(rows, cols, bushes, shrub_budget)
 
 
 def _single_qubit_z_observable(qubit_index: int, num_qubits: int) -> SparsePauliOp:
@@ -29,6 +48,8 @@ class WildfireProblemData:
     shrub_budget: int
     setup_time: float
     seed: int
+    grid: Grid
+    num_qubits: int
 
 
 class WildfireModel:
@@ -51,14 +72,21 @@ class WildfireModel:
         seed: int,
         logger: logging.Logger,
     ) -> WildfireProblemData:
-        logger.info("Creating wildfire mitigation problem instance")
+        logger.info("Creating wildfire mitigation problem instance (random graph seed=%s)", seed)
         start_problem = time()
 
         rows, cols = grid_size
-        num_qubits = rows * cols
-        rng = np.random.default_rng(seed)
+        grid = build_random_grid(
+            grid_size=grid_size,
+            brush_probability=brush_probability,
+            shrub_budget=shrub_budget,
+            seed=seed,
+        )
+        num_qubits = len(grid.bushes)
 
-        fuel_map = (rng.random((rows, cols)) < brush_probability).astype(float)
+        fuel_map = np.zeros((rows, cols), dtype=float)
+        for (r, c) in grid.bushes:
+            fuel_map[r, c] = 1.0
         row_gradient = np.linspace(1.35, 0.85, rows, dtype=float)[:, None]
         col_gradient = np.linspace(0.9, 1.1, cols, dtype=float)[None, :]
         risk_map = row_gradient * col_gradient * (0.65 + 0.35 * fuel_map)
@@ -67,27 +95,23 @@ class WildfireModel:
         graph.add_nodes_from(range(num_qubits))
         edge_weights: dict[tuple[int, int], float] = {}
 
-        for row in range(rows):
-            for col in range(cols):
-                idx = _cell_index(row, col, cols)
-                if col + 1 < cols:
-                    right = _cell_index(row, col + 1, cols)
-                    weight = 1.0 + 0.5 * float(risk_map[row, col] + risk_map[row, col + 1])
-                    graph.add_edge(idx, right, weight)
-                    edge_weights[(idx, right)] = weight
-                if row + 1 < rows:
-                    below = _cell_index(row + 1, col, cols)
-                    weight = 1.0 + 0.5 * float(risk_map[row, col] + risk_map[row + 1, col])
-                    graph.add_edge(idx, below, weight)
-                    edge_weights[(idx, below)] = weight
+        for (i, j) in grid.edges:
+            (ri, ci) = grid.bushes[i]
+            (rj, cj) = grid.bushes[j]
+            weight = 1.0 + 0.5 * float(risk_map[ri, ci] + risk_map[rj, cj])
+            graph.add_edge(i, j, weight)
+            edge_weights[(i, j)] = weight
 
         observable_groups = cls.build_observable_groups(num_qubits)
         setup_time = time() - start_problem
         logger.info(
-            "Wildfire grid=%sx%s shrubs=%s setup=%.4fs",
+            "Wildfire random graph: grid=%sx%s bushes=%s edges=%s shrubs=%s seed=%s setup=%.4fs",
             rows,
             cols,
+            num_qubits,
+            len(grid.edges),
             shrub_budget,
+            seed,
             setup_time,
         )
 
@@ -101,6 +125,8 @@ class WildfireModel:
             shrub_budget=shrub_budget,
             setup_time=setup_time,
             seed=seed,
+            grid=grid,
+            num_qubits=num_qubits,
         )
 
     @staticmethod
