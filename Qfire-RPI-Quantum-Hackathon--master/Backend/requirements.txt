@@ -1,0 +1,14 @@
+fastapi>=0.115
+uvicorn>=0.30
+sqlalchemy>=2.0
+pydantic>=2.8
+pytest>=8.0
+httpx>=0.27
+python-dotenv>=1.0
+numpy>=1.26
+scikit-learn>=1.5
+qbraid>=0.11
+qiskit>=2.3
+qiskit-aer>=0.17
+qiskit-ibm-runtime>=0.46
+qiskit-qasm3-import>=0.6
