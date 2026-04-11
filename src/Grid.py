@@ -14,6 +14,7 @@ class Grid:
         for i, bush in enumerate(bushes):
             self.idx[bush] = i # Map 2D grid coordinate -> 1D index
         self.edges = self.BuildEdges()
+        self.degree_sequence = self.GetDegreeSequence()
         pass
 
     @classmethod
@@ -52,11 +53,26 @@ class Grid:
                 if (i[0] == j[0] and abs(i[1] - j[1]) == 1) or (i[1] == j[1] and abs(i[0] - j[0]) == 1):
                     edges.append((self.idx[i], self.idx[j]))
         return edges
+    
+    def GetDegreeSequence(self) -> list[int]:
+        degree_sequence = [0] * len(self.bushes)
+        for (i, j) in self.edges:
+            degree_sequence[i] += 1
+            degree_sequence[j] += 1
+        return degree_sequence
 
     def BuildQAOALayer(self, gamma: float, beta: float) -> QuantumCircuit:
         """Build a single QAOA layer for the grid problem."""
         num_qubits = len(self.bushes)
         qc = QuantumCircuit(num_qubits)
+
+        # rz gates
+        for i in range(num_qubits):
+            degree = self.degree_sequence[i]
+            if degree > 0:
+                qc.rz(-gamma * degree, i) # Apply RZ with angle proportional to degree of vertex
+        
+        qc.barrier()
 
         # Apply cost unitary for each edge
         for (i, j) in self.edges:
