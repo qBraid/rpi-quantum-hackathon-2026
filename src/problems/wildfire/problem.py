@@ -209,6 +209,10 @@ class WildfireMitigationProblem(Problem):
             "fire_break_score": fire_break_score,
             "selected_sites": sorted(selected_sites),
             "selected_cells": selected_cells,
+            "grid_size": [self.grid_rows, self.grid_cols],
+            "shrub_budget": self.shrub_budget,
+            "fuel_map": problem_data.fuel_map.tolist(),
+            "risk_map": problem_data.risk_map.tolist(),
             "exp_map": final_exp_map,
         }
 

@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=["aer", "clifford"],
         help="qBraid environments to include in matrix mode.",
     )
+    parser.add_argument(
+        "--no-wildfire-plot",
+        action="store_true",
+        help="Disable matplotlib visualization for wildfire runs.",
+    )
 
     for problem_cls in PROBLEMS.values():
         problem_cls.add_cli_arguments(parser)
@@ -127,6 +132,7 @@ def _build_executor_runs(args: argparse.Namespace) -> list[ExecutorRun]:
                             maxiter=args.maxiter,
                             strategy=strategy,
                             environment=environment,
+                            qbraid_shots=args.qbraid_shots,
                         ),
                     )
                 )
@@ -227,6 +233,17 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
         f"(run={best_result.get('run_label')}, {best_metric_name}={best_metric_value})"
     )
     print("=" * 70)
+
+    if args.problem == "wildfire" and not args.no_wildfire_plot:
+        from utils.wildfire_visualization import show_wildfire_result
+
+        postprocess = best_result.get("postprocess")
+        if isinstance(postprocess, dict):
+            show_wildfire_result(
+                postprocess,
+                title="Wildfire Mitigation Result",
+                block=True,
+            )
 
     return {
         "problem": args.problem,
