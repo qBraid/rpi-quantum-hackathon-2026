@@ -253,6 +253,48 @@ def _select_best_benchmark_result(
     return _select_best_result(results)
 
 
+def _show_best_wildfire_views(
+    *,
+    result: dict[str, Any],
+    show_wildfire_result,
+    show_wildfire_result_3d,
+    open_figures: list[plt.Figure],
+    open_plotters: list[Any],
+    current_figure: plt.Figure | None,
+    current_plotter: Any | None,
+) -> tuple[plt.Figure | None, Any | None]:
+    postprocess = result.get("postprocess")
+    if not isinstance(postprocess, dict):
+        return current_figure, current_plotter
+
+    if current_figure is not None and plt.fignum_exists(current_figure.number):
+        plt.close(current_figure)
+    if current_plotter is not None and not getattr(current_plotter, "_closed", True):
+        try:
+            current_plotter.close()
+        except Exception:
+            pass
+
+    figure = show_wildfire_result(
+        postprocess,
+        title=f"Wildfire Mitigation - BEST ({result.get('combination')})",
+        block=False,
+    )
+    plotter = None
+    if show_wildfire_result_3d is not None:
+        plotter = show_wildfire_result_3d(
+            postprocess,
+            title=f"Wildfire Mitigation (3D) - BEST ({result.get('combination')})",
+            block=False,
+        )
+
+    if figure is not None:
+        open_figures.append(figure)
+    if plotter is not None:
+        open_plotters.append(plotter)
+    return figure, plotter
+
+
 def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     problem_cls = PROBLEMS[args.problem]
     problem = problem_cls.from_namespace(args)
@@ -264,27 +306,27 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
         and args.run_matrix
         and any(isinstance(run.executor, QBraidExecutor) for run in runs)
     )
-    dashboard = None
+
+    immediate_runs = list(runs)
+    deferred_qbraid_hardware_runs: list[ExecutorRun] = []
     if should_use_dashboard:
-        from dashboard import BenchmarkDashboard, LiveProblem
-
-        dashboard = BenchmarkDashboard()
-        dashboard_qbraid_strategies: list[str] = []
+        immediate_runs = []
         for run in runs:
-            if isinstance(run.executor, QBraidExecutor) and run.executor.strategy not in dashboard_qbraid_strategies:
-                dashboard_qbraid_strategies.append(run.executor.strategy)
-        dashboard.setup_qpu(
-            problem=problem,
-            optimizer=optimizer,
-            backend=args.backend,
-            shots=args.qbraid_shots,
-            strategies=dashboard_qbraid_strategies,
-        )
+            if isinstance(run.executor, QBraidExecutor) and run.executor.environment == "hardware":
+                deferred_qbraid_hardware_runs.append(run)
+            else:
+                immediate_runs.append(run)
 
-    topic_sets = [frozenset(run.executor.benchmark_topics) for run in runs]
-    unique_topic_sets = set(topic_sets)
-    benchmark_topics = set(topic_sets[0]) if topic_sets else set()
-    benchmark_enabled = len(unique_topic_sets) == 1 and bool(benchmark_topics)
+    show_hardware_button = bool(deferred_qbraid_hardware_runs)
+
+    dashboard = None
+    live_problem_cls = None
+    current_best_result: dict[str, Any] | None = None
+    open_figures: list[plt.Figure] = []
+    open_plotters: list[Any] = []
+    best_figure: plt.Figure | None = None
+    best_plotter: Any | None = None
+    all_results: list[dict[str, Any]] = []
 
     show_wildfire_result = None
     show_wildfire_result_3d = None
@@ -293,14 +335,54 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
         from utils.wildfire_3d_visualization import show_wildfire_result_3d
         from utils.wildfire_visualization import show_wildfire_result
 
-    open_figures: list[plt.Figure] = []
-    open_plotters: list[Any] = []
-    all_results: list[dict[str, Any]] = []
-    for run in runs:
+    def on_dashboard_hardware_result(result: dict[str, Any]) -> None:
+        nonlocal current_best_result, best_figure, best_plotter
+        all_results.append(result)
+        new_best = _select_best_result(all_results)
+        if new_best is current_best_result or not should_plot_wildfire or show_wildfire_result is None:
+            current_best_result = new_best
+            return
+
+        current_best_result = new_best
+        if new_best is result:
+            best_figure, best_plotter = _show_best_wildfire_views(
+                result=new_best,
+                show_wildfire_result=show_wildfire_result,
+                show_wildfire_result_3d=show_wildfire_result_3d,
+                open_figures=open_figures,
+                open_plotters=open_plotters,
+                current_figure=best_figure,
+                current_plotter=best_plotter,
+            )
+
+    if should_use_dashboard:
+        from dashboard import BenchmarkDashboard, LiveProblem as DashboardLiveProblem
+
+        dashboard = BenchmarkDashboard()
+        live_problem_cls = DashboardLiveProblem
+        dashboard_qbraid_strategies = [
+            run.executor.strategy
+            for run in deferred_qbraid_hardware_runs
+            if isinstance(run.executor, QBraidExecutor)
+        ]
+        dashboard.setup_qpu(
+            problem=problem,
+            optimizer=optimizer,
+            backend=args.backend,
+            shots=args.qbraid_shots,
+            strategies=dashboard_qbraid_strategies,
+            on_result=on_dashboard_hardware_result,
+        )
+
+    benchmark_topics: set[str] = set()
+    benchmark_enabled = False
+
+    for run in immediate_runs:
         print(f"\n--- Running {run.executor.run_label} ---")
         if dashboard is not None and isinstance(run.executor, QBraidExecutor):
+            assert live_problem_cls is not None
             dashboard.set_current_run(f"{run.executor.strategy}/{run.executor.environment}")
-            live_problem = LiveProblem(problem, on_iteration=dashboard.record_iteration)
+            live_problem = live_problem_cls(problem, on_iteration=dashboard.record_iteration)
             result = run.executor.execute(live_problem, optimizer=optimizer)
         else:
             result = run.executor.execute(problem, optimizer=optimizer)
@@ -310,30 +392,62 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
         if dashboard is not None and isinstance(run.executor, QBraidExecutor):
             dashboard.add_result(result)
 
+    if all_results:
+        current_best_result = _select_best_result(all_results)
         if should_plot_wildfire and show_wildfire_result is not None:
-            postprocess = result.get("postprocess")
-            if isinstance(postprocess, dict):
-                fig = show_wildfire_result(
-                    postprocess,
-                    title=f"Wildfire Mitigation - {run.name}",
-                    block=False,
-                )
-                if fig is not None:
-                    open_figures.append(fig)
-                if show_wildfire_result_3d is not None:
-                    plotter = show_wildfire_result_3d(
-                        postprocess,
-                        title=f"Wildfire Mitigation (3D) - {run.name}",
-                        block=False,
-                    )
-                    if plotter is not None:
-                        open_plotters.append(plotter)
+            best_figure, best_plotter = _show_best_wildfire_views(
+                result=current_best_result,
+                show_wildfire_result=show_wildfire_result,
+                show_wildfire_result_3d=show_wildfire_result_3d,
+                open_figures=open_figures,
+                open_plotters=open_plotters,
+                current_figure=best_figure,
+                current_plotter=best_plotter,
+            )
 
     if dashboard is not None:
-        dashboard_fig = dashboard.finalize(block=False)
+        dashboard_fig = dashboard.finalize(block=False, show_hardware_button=show_hardware_button)
         open_figures.append(dashboard_fig)
 
+    if open_figures or open_plotters:
+        while True:
+            active_figures = [fig for fig in open_figures if plt.fignum_exists(fig.number)]
+            active_plotters = [plotter for plotter in open_plotters if not getattr(plotter, "_closed", True)]
+            if not active_figures and not active_plotters:
+                break
+            for fig in active_figures:
+                try:
+                    fig.canvas.flush_events()
+                except Exception:
+                    continue
+            for plotter in active_plotters:
+                try:
+                    plotter.update()
+                    plotter.iren.process_events()
+                except Exception:
+                    continue
+            time.sleep(0.05)
+
+    if not all_results:
+        print("No benchmark results were produced.")
+        return {
+            "problem": args.problem,
+            "optimizer": optimizer.label,
+            "benchmark_enabled": False,
+            "benchmark_summary": None,
+            "results": [],
+            "best_result": None,
+        }
+
     best_result = _select_best_result(all_results)
+
+    result_topic_sets = {
+        frozenset(topic for topic in item.get("benchmark_topics", []) if isinstance(topic, str))
+        for item in all_results
+    }
+    if len(result_topic_sets) == 1:
+        benchmark_topics = set(next(iter(result_topic_sets)))
+        benchmark_enabled = bool(benchmark_topics)
 
     benchmark_summary: dict[str, Any] | None = None
     if benchmark_enabled:
@@ -343,7 +457,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
             "best_combination": best_benchmark.get("combination"),
             "best_run_label": best_benchmark.get("run_label"),
         }
-    elif len(runs) > 1:
+    elif len(all_results) > 1:
         print(
             "Skipping benchmark comparison: combinations expose different benchmark topics."
         )
@@ -366,23 +480,6 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     print("=" * 70)
 
     if open_figures or open_plotters:
-        while True:
-            active_figures = [fig for fig in open_figures if plt.fignum_exists(fig.number)]
-            active_plotters = [plotter for plotter in open_plotters if not getattr(plotter, "_closed", True)]
-            if not active_figures and not active_plotters:
-                break
-            for fig in active_figures:
-                try:
-                    fig.canvas.flush_events()
-                except Exception:
-                    continue
-            for plotter in active_plotters:
-                try:
-                    plotter.update()
-                    plotter.iren.process_events()
-                except Exception:
-                    continue
-            time.sleep(0.05)
 
         plt.close("all")
         for plotter in open_plotters:

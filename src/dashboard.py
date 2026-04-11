@@ -130,6 +130,7 @@ class BenchmarkDashboard:
         self._qpu_thread: threading.Thread | None = None
         self._btn_qpu: Button | None = None
         self._ax_btn = None
+        self._on_hardware_result: Callable[[dict[str, Any]], None] | None = None
 
         self.fig.subplots_adjust(top=0.92, bottom=0.10, left=0.07, right=0.97)
         plt.ion()
@@ -162,14 +163,17 @@ class BenchmarkDashboard:
         backend: str,
         shots: int,
         strategies: list[str],
+        on_result: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
+        unique_strategies = list(dict.fromkeys(strategies))
         self._qpu_run_config = dict(
             problem=problem,
             optimizer=optimizer,
             backend=backend,
             shots=shots,
-            strategies=strategies,
+            strategies=unique_strategies,
         )
+        self._on_hardware_result = on_result
 
     def _on_qpu_click(self, _event) -> None:
         if self._qpu_run_config is None:
@@ -245,6 +249,8 @@ class BenchmarkDashboard:
                 if not result.get("loss_history"):
                     result["loss_history"] = list(self._cur_loss)
                 self._results.append(result)
+                if self._on_hardware_result is not None:
+                    self._on_hardware_result(result)
                 self._cur_loss = []
                 self._cur_label = ""
                 changed = True
@@ -264,31 +270,34 @@ class BenchmarkDashboard:
         if changed:
             self._draw(_pause=False)
 
-    def finalize(self, *, block: bool = True) -> plt.Figure:
+    def finalize(self, *, block: bool = True, show_hardware_button: bool = True) -> plt.Figure:
         plt.ioff()
-        end_title = self._TITLE + "\n— benchmark complete —  (click button below to run on real QPU)"
-        self.fig.suptitle(end_title, fontsize=10, fontweight="bold", color="#10b981")
+        end_title = self._TITLE + "\n— benchmark complete —"
+        if show_hardware_button and self._qpu_run_config and self._qpu_run_config.get("strategies"):
+            end_title += "  (click button below to run on real QPU)"
+        self.fig.suptitle(end_title, fontsize=10, fontweight="bold", color="white")
         self._draw()
 
         out = Path(__file__).resolve().parent / "benchmark_result.png"
         self.fig.savefig(out, dpi=150, bbox_inches="tight", facecolor=self.fig.get_facecolor())
         print(f"\n[dashboard] saved → {out}")
 
-        self._ax_btn = self.fig.add_axes((0.35, 0.015, 0.30, 0.050))
-        self._btn_qpu = Button(
-            self._ax_btn,
-            "▶  Run on QPU  (real hardware)",
-            color="#1a2035",
-            hovercolor="#2d3a52",
-        )
-        self._btn_qpu.label.set_color("#e2e8f0")
-        self._btn_qpu.label.set_fontsize(9)
-        self._btn_qpu.label.set_fontweight("bold")
-        self._btn_qpu.on_clicked(self._on_qpu_click)
+        if show_hardware_button and self._qpu_run_config and self._qpu_run_config.get("strategies"):
+            self._ax_btn = self.fig.add_axes((0.35, 0.015, 0.30, 0.050))
+            self._btn_qpu = Button(
+                self._ax_btn,
+                "▶  Run on QPU  (real hardware)",
+                color="#1a2035",
+                hovercolor="#2d3a52",
+            )
+            self._btn_qpu.label.set_color("white")
+            self._btn_qpu.label.set_fontsize(9)
+            self._btn_qpu.label.set_fontweight("bold")
+            self._btn_qpu.on_clicked(self._on_qpu_click)
 
-        self._qpu_timer = self.fig.canvas.new_timer(interval=200)
-        self._qpu_timer.add_callback(self._poll_qpu_data)
-        self._qpu_timer.start()
+            self._qpu_timer = self.fig.canvas.new_timer(interval=200)
+            self._qpu_timer.add_callback(self._poll_qpu_data)
+            self._qpu_timer.start()
 
         self.fig.canvas.draw_idle()
         plt.show(block=block)
@@ -309,12 +318,13 @@ class BenchmarkDashboard:
             cols = [_run_color(result, index) for index, result in enumerate(results)]
             bars = ax.bar(keys, scores, color=cols, edgecolor="white", linewidth=0.4)
             ax.bar_label(bars, fmt="%.2f", padding=3, fontsize=7, color="white")
-        ax.set_title("Output Quality — Fire-break score / quality score  (↑ better)", fontsize=8, fontweight="bold")
-        ax.set_ylabel("Quality score", fontsize=7)
-        ax.tick_params(axis="x", labelsize=7)
+        ax.set_title("Output Quality — Fire-break score / quality score  (↑ better)", fontsize=8, fontweight="bold", color="white")
+        ax.set_ylabel("Quality score", fontsize=7, color="white")
+        ax.tick_params(axis="x", labelsize=7, colors="white")
+        ax.tick_params(axis="y", colors="white")
         ax.grid(axis="y", alpha=0.25)
         if current_label:
-            ax.set_xlabel(f"⏳ Running: {current_label}", fontsize=7, color="#f59e0b")
+            ax.set_xlabel(f"⏳ Running: {current_label}", fontsize=7, color="white")
 
         ax = self._ax_tradeoff
         ax.cla(); ax.set_facecolor(_BG)
@@ -331,10 +341,13 @@ class BenchmarkDashboard:
                 linewidths=0.5,
             )
         if results:
-            ax.legend(fontsize=6, loc="best")
-        ax.set_title("Quality vs Resource Cost", fontsize=8, fontweight="bold")
-        ax.set_xlabel("Compiled resource cost  ↓", fontsize=7)
-        ax.set_ylabel("Quality  ↑", fontsize=7)
+            legend = ax.legend(fontsize=6, loc="best")
+            for text in legend.get_texts():
+                text.set_color("white")
+        ax.set_title("Quality vs Resource Cost", fontsize=8, fontweight="bold", color="white")
+        ax.set_xlabel("Compiled resource cost  ↓", fontsize=7, color="white")
+        ax.set_ylabel("Quality  ↑", fontsize=7, color="white")
+        ax.tick_params(axis="both", colors="white")
         ax.grid(alpha=0.25)
 
         ax = self._ax_depth
@@ -345,8 +358,9 @@ class BenchmarkDashboard:
             cols = [_run_color(result, index) for index, result in enumerate(results)]
             bars = ax.bar(keys, vals, color=cols, edgecolor="white", linewidth=0.4)
             ax.bar_label(bars, padding=2, fontsize=7, color="white")
-        ax.set_title("Circuit Depth  (↓ better)", fontsize=8, fontweight="bold")
-        ax.tick_params(axis="x", labelsize=6)
+        ax.set_title("Circuit Depth  (↓ better)", fontsize=8, fontweight="bold", color="white")
+        ax.tick_params(axis="x", labelsize=6, colors="white")
+        ax.tick_params(axis="y", colors="white")
         ax.grid(axis="y", alpha=0.25)
 
         ax = self._ax_twoq
@@ -357,8 +371,9 @@ class BenchmarkDashboard:
             cols = [_run_color(result, index) for index, result in enumerate(results)]
             bars = ax.bar(keys, vals, color=cols, edgecolor="white", linewidth=0.4)
             ax.bar_label(bars, padding=2, fontsize=7, color="white")
-        ax.set_title("2-Qubit Gate Count  (↓ better)", fontsize=8, fontweight="bold")
-        ax.tick_params(axis="x", labelsize=6)
+        ax.set_title("2-Qubit Gate Count  (↓ better)", fontsize=8, fontweight="bold", color="white")
+        ax.tick_params(axis="x", labelsize=6, colors="white")
+        ax.tick_params(axis="y", colors="white")
         ax.grid(axis="y", alpha=0.25)
 
         ax = self._ax_approx
@@ -372,9 +387,12 @@ class BenchmarkDashboard:
             bars = ax.bar(keys, ratios, color=cols, edgecolor="white", linewidth=0.4)
             ax.bar_label(bars, fmt="%.3f", padding=2, fontsize=7, color="white")
             ax.axhline(1.0, color="#10b981", linestyle="--", linewidth=1, label="best run")
-            ax.legend(fontsize=6)
-        ax.set_title("Approx. Ratio  (quality / best run)", fontsize=8, fontweight="bold")
-        ax.tick_params(axis="x", labelsize=6)
+            legend = ax.legend(fontsize=6)
+            for text in legend.get_texts():
+                text.set_color("white")
+        ax.set_title("Approx. Ratio  (quality / best run)", fontsize=8, fontweight="bold", color="white")
+        ax.tick_params(axis="x", labelsize=6, colors="white")
+        ax.tick_params(axis="y", colors="white")
         ax.set_ylim(0, 1.35)
         ax.grid(axis="y", alpha=0.25)
 
@@ -401,11 +419,14 @@ class BenchmarkDashboard:
                 linewidth=1.6,
                 label=f"{current_label} (live)" if current_label else "current (live)",
             )
-        ax.set_title("Optimization Loss Convergence", fontsize=8, fontweight="bold")
-        ax.set_xlabel("Iteration", fontsize=7)
-        ax.set_ylabel("Loss", fontsize=7)
+        ax.set_title("Optimization Loss Convergence", fontsize=8, fontweight="bold", color="white")
+        ax.set_xlabel("Iteration", fontsize=7, color="white")
+        ax.set_ylabel("Loss", fontsize=7, color="white")
+        ax.tick_params(axis="both", colors="white")
         if results or current_loss:
-            ax.legend(fontsize=7, loc="upper right")
+            legend = ax.legend(fontsize=7, loc="upper right")
+            for text in legend.get_texts():
+                text.set_color("white")
         ax.grid(alpha=0.2)
 
         ax = self._ax_strat
@@ -422,13 +443,14 @@ class BenchmarkDashboard:
                     f" {strategy}\n Q={avg_quality:.1f}\n C={avg_cost:.0f}",
                     (avg_cost, avg_quality),
                     fontsize=7,
-                    color=color,
+                    color="white",
                     xytext=(6, 4),
                     textcoords="offset points",
                 )
-        ax.set_title("Strategy Summary\n(avg across environments)", fontsize=8, fontweight="bold")
-        ax.set_xlabel("Avg cost", fontsize=7)
-        ax.set_ylabel("Avg quality", fontsize=7)
+        ax.set_title("Strategy Summary\n(avg across environments)", fontsize=8, fontweight="bold", color="white")
+        ax.set_xlabel("Avg cost", fontsize=7, color="white")
+        ax.set_ylabel("Avg quality", fontsize=7, color="white")
+        ax.tick_params(axis="both", colors="white")
         ax.grid(alpha=0.25)
 
         self.fig.canvas.draw_idle()

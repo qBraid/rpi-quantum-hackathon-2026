@@ -155,7 +155,7 @@ uv run python src/main.py \
   --layer-reps 2
 ```
 
-When `--run-matrix` includes qBraid runs for the wildfire problem, the live dashboard helper in `src/dashboard.py` activates automatically and stays in sync with the non-blocking 2-panel Matplotlib result view and the optional PyVista scene. It is not a standalone launcher.
+When `--run-matrix` includes qBraid runs for the wildfire problem, the live dashboard helper in `src/dashboard.py` activates automatically and stays in sync with the non-blocking 2-panel Matplotlib result view and the optional PyVista scene. The pipeline shows only the current best 2D/3D wildfire plots after matrix runs complete, and the real-hardware button appears only when `hardware` is included in `--benchmark-qbraid-environments`.
 
 **Executor comparison**
 
