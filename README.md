@@ -1,19 +1,23 @@
-# Quantum Hackathon Benchmark Suite
+# Quantum Hackathon Wildfire Benchmark Suite
 
-This project benchmarks two optimization workflows with a dependency-injected structure:
+This project benchmarks wildfire mitigation optimization workflows using a dependency-injected architecture. The suite compares quantum circuit compilation strategies and runtime environments to identify optimal quality/cost tradeoffs.
 
-- `src/problems/maxcut_problem/` contains the relocated Max-Cut problem implementation
-- `src/problems/wildfire/` contains the wildfire mitigation problem based on the layer-optimized circuit layout
-- `src/executors/qiskit_executor.py` contains the Qiskit runtime executor
-- `src/executors/qbraid_executor.py` contains the qBraid-focused executor (including qBraid cloud mode via `QbraidProvider`)
-- `src/main.py` owns matrix orchestration and cross-combination benchmark comparison logic
+## Project Structure
+
+- `src/problems/wildfire/` – wildfire mitigation problem using the layer-optimized circuit layout
+- `src/executors/qiskit_executor.py` – Qiskit runtime executor
+- `src/executors/qbraid_executor.py` – qBraid-focused executor (including qBraid Quantum Cloud support)
+- `src/optimizers/` – SPSA and SciPy-based optimization backends
+- `src/main.py` – composition root with matrix orchestration and benchmark comparison logic
+
+## Execution Environments
 
 The benchmark supports four runtime modes:
 
-- `hardware`: run on a real IBM Quantum backend
-- `aer`: run on an Aer simulator seeded from an IBM backend configuration
-- `clifford`: run locally on the Aer stabilizer simulator
-- `cloud`: run on qBraid Quantum Cloud using a qBraid device ID
+- `hardware` – run on a real IBM Quantum backend
+- `aer` – run on an Aer simulator seeded from an IBM backend configuration
+- `clifford` – run locally on the Aer stabilizer simulator
+- `cloud` – run on qBraid Quantum Cloud using a qBraid device ID
 
 ## Quickstart (uv)
 
@@ -38,12 +42,10 @@ uv sync
 
 This creates `.venv` (if needed) and installs dependencies from `uv.lock`.
 
-### 4) (Optional) Activate the venv manually
-
-If you prefer an activated shell instead of `uv run`:
+### 4) Verify CLI wiring
 
 ```bash
-source .venv/bin/activate
+uv run python src/main.py --help
 ```
 
 ### 5) Configure IBM Runtime credentials
@@ -61,23 +63,15 @@ EOF
 
 `clifford` mode does not require IBM credentials.
 
-### 5b) Configure qBraid cloud credentials (for `qbraid --qbraid-environment cloud`)
+### 5b) Configure qBraid cloud credentials (optional)
 
-Set `QBRAID_API_KEY` in your shell or `.env` file.
-
-```bash
-export QBRAID_API_KEY=your_qbraid_api_key
-```
-
-If using `.env`, add:
+Set `QBRAID_API_KEY` in your `.env` file for cloud mode:
 
 ```bash
 cat >> .env <<'EOF'
 QBRAID_API_KEY=your_qbraid_api_key
 EOF
 ```
-
-Cloud mode reads `--backend` as a qBraid device ID (not an IBM backend name).
 
 ### 6) Verify CLI wiring
 
@@ -87,26 +81,39 @@ uv run python src/main.py --help
 
 ## Running Benchmarks
 
+The wildfire benchmark compares quantum circuit compilation strategies and execution environments. Use `uv run` to invoke all commands.
+
 ### Single-run examples
 
-```bash
-uv run python src/main.py --executor qiskit --mode clifford --num-nodes 60
-uv run python src/main.py --executor qiskit --mode aer --backend ibm_rensselaer --num-nodes 60
-uv run python src/main.py --executor qbraid --qbraid-strategy balanced --qbraid-environment hardware --backend ibm_rensselaer --num-nodes 60
-uv run python src/main.py --executor qbraid --qbraid-strategy aggressive --qbraid-environment aer --num-nodes 60
-uv run python src/main.py --executor qbraid --qbraid-environment cloud --qbraid-strategy balanced --backend <qbraid_device_id> --qbraid-shots 2048 --num-nodes 60
-uv run python src/main.py --problem wildfire --executor qiskit --mode clifford --grid-rows 10 --grid-cols 10 --shrub-budget 10
-```
-
-Minimal qBraid cloud example:
+Clifford simulator (no credentials required):
 
 ```bash
-uv run python src/main.py --executor qbraid --qbraid-environment cloud --backend <qbraid_device_id>
+uv run python src/main.py --grid-rows 10 --grid-cols 10 --shrub-budget 10
 ```
 
-### qBraid comparison matrix (recommended)
+Qiskit on a specific IBM backend:
 
-Compare at least two compile strategies across at least two environments:
+```bash
+uv run python src/main.py --executor qiskit --mode aer --backend ibm_rensselaer --grid-rows 10 --grid-cols 10
+```
+
+qBraid balanced strategy on hardware:
+
+```bash
+uv run python src/main.py --executor qbraid --qbraid-strategy balanced --qbraid-environment hardware --backend ibm_rensselaer --grid-rows 10 --grid-cols 10
+```
+
+qBraid cloud mode:
+
+```bash
+uv run python src/main.py --executor qbraid --qbraid-environment cloud --qbraid-strategy balanced --backend <qbraid_device_id> --grid-rows 10 --grid-cols 10 --qbraid-shots 2048
+```
+
+### Benchmarking and comparison matrices
+
+**Recommended: qBraid strategy comparison**
+
+Compare compilation strategies across execution environments:
 
 ```bash
 uv run python src/main.py \
@@ -114,63 +121,137 @@ uv run python src/main.py \
   --benchmark-executors qbraid \
   --benchmark-qbraid-strategies balanced aggressive \
   --benchmark-qbraid-environments hardware aer clifford cloud \
-  --num-nodes 60 \
-  --num-qubits 10 \
-  --reps 2
+  --grid-rows 10 \
+  --grid-cols 10 \
+  --shrub-budget 10 \
+  --layer-reps 2
 ```
 
-### Mixed qiskit + qbraid matrix
+**Executor comparison**
+
+Compare qiskit and qbraid on shared environments:
 
 ```bash
 uv run python src/main.py \
   --run-matrix \
   --benchmark-executors qiskit qbraid \
-  --benchmark-qiskit-modes clifford \
+  --benchmark-qiskit-modes clifford aer \
   --benchmark-qbraid-strategies balanced aggressive \
-  --benchmark-qbraid-environments hardware aer clifford cloud \
-  --num-nodes 60
+  --benchmark-qbraid-environments clifford aer \
+  --grid-rows 10 \
+  --grid-cols 10 \
+  --shrub-budget 10
 ```
 
-Note: mixed matrices still run and list all combinations. Topic-based benchmark comparison is only performed when all combinations expose the same `benchmark_topics` set.
+### Benchmarking parameters
 
-## Options
+**Wildfire problem parameters:**
 
-- Global options
-  - `--problem`: selects the problem implementation (`maxcut`, `wildfire`)
-  - `--executor`: selects the executor implementation (`qiskit` or `qbraid`) for single-run mode
-  - `--run-matrix`: run all selected executor/option combinations
-  - `--benchmark-executors`: executors included in matrix mode
+- `--grid-rows`: grid row count (default: 20)
+- `--grid-cols`: grid column count (default: 20)
+- `--shrub-budget`: Toyon shrub budget (default: 15)
+- `--brush-probability`: chance a cell starts as dry brush (default: 0.3)
+- `--wildfire-seed`: random seed for landscape generation
+- `--layer-reps`: layer-optimized circuit repetitions (default: 1)
 
-- Problem options
-  - MaxCut: `--num-nodes`, `--num-qubits`, `--graph-probability`, `--seed`, `--reps`
-  - Wildfire: `--grid-rows`, `--grid-cols`, `--shrub-budget`, `--brush-probability`, `--wildfire-seed`, `--layer-reps`
+**Executor parameters:**
 
-- MaxCut options
-  - `--num-nodes`: graph size
-  - `--num-qubits`: ansatz width
-  - `--graph-probability`: random graph edge probability
-  - `--seed`: random seed
-  - `--reps`: ansatz repetitions
+- `--executor`: executor implementation (`qiskit` or `qbraid`)
+- `--mode` (Qiskit): execution backend (`hardware`, `aer`, `clifford`)
+- `--backend`: IBM backend name or qBraid device ID
+- `--qbraid-strategy`: compilation strategy (`balanced`, `aggressive`)
+- `--qbraid-environment`: execution environment (`hardware`, `aer`, `clifford`, `cloud`)
+- `--qbraid-shots`: shots per iteration in cloud mode (default: 1024)
 
-- Wildfire options
-  - `--grid-rows`: grid row count
-  - `--grid-cols`: grid column count
-  - `--shrub-budget`: Toyon shrub budget
-  - `--brush-probability`: chance that a cell starts as dry brush
-  - `--wildfire-seed`: random seed for landscape generation
-  - `--layer-reps`: layer-optimized circuit repetitions
+**Matrix benchmarking parameters:**
 
-- Qiskit executor options
-  - `--mode`: execution backend (`hardware`, `aer`, `clifford`)
-  - `--backend`: IBM backend name used for `hardware` and `aer`
-  - `--maxiter`: COBYLA iteration limit
+- `--run-matrix`: enable matrix mode
+- `--benchmark-executors`: executors to compare
+- `--benchmark-qiskit-modes`: Qiskit modes to compare
+- `--benchmark-qbraid-strategies`: qBraid strategies to compare
+- `--benchmark-qbraid-environments`: qBraid environments to compare
 
-- qBraid executor options
-  - `--qbraid-strategy`: single-run strategy (`balanced`, `aggressive`)
-  - `--qbraid-environment`: single-run environment (`hardware`, `aer`, `clifford`, `cloud`)
-  - `--qbraid-shots`: per-iteration shots used in `cloud` mode
-  - `--benchmark-qbraid-strategies`: matrix strategies
-  - `--benchmark-qbraid-environments`: matrix environments
+## Benchmark Design
+
+### Algorithm
+
+This benchmark performs **wildfire mitigation** optimization leveraging QAOA. The default optimizer is a hardware-friendly **SPSA** backend, selected through dependency injection for robustness on real quantum hardware.
+
+### Architecture
+
+The benchmark is organized around a composition root in `src/main.py` that wires together:
+
+- a **problem** object (`src/problems/wildfire/`)
+- an **executor** object (`src/executors/...`)
+- an **optimizer** object (`src/optimizers/...`)
+
+## Compilation Strategies
+
+The qBraid executor supports the following compilation strategies in matrix mode:
+
+- `balanced` – balanced transpilation for quality and speed
+- `aggressive` – aggressive optimization for minimal gate count
+
+## Metrics Collected
+
+The benchmark records the following metrics from each wildfire run:
+
+- **Circuit metrics**
+  - Circuit depth (`depth`)
+  - Circuit size (`size`)
+  - Two-qubit gate count (`two_qubit_ops`)
+  - Transpilation time (`transpile_time`)
+
+- **Optimization metrics**
+  - Fire-break score (`fire_break_score`)
+  - Optimization loss (`loss`)
+  - Optimized parameters (gamma, beta)
+
+- **Quality metrics**
+  - Quality score (`quality_score`)
+  - Compiled resource cost (`compiled_resource_cost`)
+  - Tradeoff score (`tradeoff_score`)
+
+For wildfire, logs also report the optimized `gamma` and `beta` parameters with fixed-precision formatting, and plots overlay selected Toyon sites on the risk map.
+
+## Best Quality/Cost Tradeoff
+
+The best tradeoff is the combination with the highest observed `tradeoff_score` in the matrix summary output. For reproducible reporting, record the best observed `tradeoff_score` from the latest matrix execution and cite its `run_label`, `optimizer_method`, and `fire_break_score`.
+
+## Command-Line Options
+
+### Global options
+
+- `--executor`: selects the executor implementation (`qiskit` or `qbraid`) for single-run mode
+- `--run-matrix`: run all selected executor/option combinations
+
+### Problem parameters
+
+- `--grid-rows`: grid row count (default: 20)
+- `--grid-cols`: grid column count (default: 20)
+- `--shrub-budget`: Toyon shrub budget (default: 15)
+- `--brush-probability`: chance that a cell starts as dry brush (default: 0.3)
+- `--wildfire-seed`: random seed for landscape generation
+- `--layer-reps`: layer-optimized circuit repetitions (default: 1)
+
+### Qiskit executor options
+
+- `--mode`: execution backend (`hardware`, `aer`, `clifford`)
+- `--backend`: IBM backend name used for `hardware` and `aer` modes
+- `--maxiter`: COBYLA iteration limit
+
+### qBraid executor options
+
+- `--qbraid-strategy`: single-run strategy (`balanced`, `aggressive`)
+- `--qbraid-environment`: single-run environment (`hardware`, `aer`, `clifford`, `cloud`)
+- `--qbraid-shots`: per-iteration shots used in `cloud` mode (default: 1024)
+
+### Matrix benchmarking options
+
+- `--benchmark-executors`: executors to compare (default: `qbraid`)
+- `--benchmark-qiskit-modes`: Qiskit modes to compare
+- `--benchmark-qbraid-strategies`: qBraid strategies to compare
+- `--benchmark-qbraid-environments`: qBraid environments to compare
 
 ## Logging Behavior
 
