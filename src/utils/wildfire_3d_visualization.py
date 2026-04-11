@@ -14,6 +14,12 @@ TREE_MODEL_NAMES = (
     "tree_pineTallA.glb",
 )
 
+DRY_BUSH_MODEL_NAMES = (
+    "plant_bushDetailed.glb",
+    "plant_bushLarge.glb",
+    "plant_bush.glb",
+)
+
 
 def _resolve_assets_dir(assets_dir: str | Path | None) -> Path:
     if assets_dir is not None:
@@ -110,6 +116,39 @@ def _load_tree_meshes(assets_dir: Path) -> list[list[tuple[pv.PolyData, tuple[fl
     return model_meshes
 
 
+def _load_dry_bush_meshes(assets_dir: Path) -> list[list[tuple[pv.PolyData, tuple[float, float, float] | None]]]:
+    model_meshes: list[list[tuple[pv.PolyData, tuple[float, float, float] | None]]] = []
+    for name in DRY_BUSH_MODEL_NAMES:
+        model_path = assets_dir / name
+        if not model_path.exists():
+            continue
+
+        parts = _iter_polydata_blocks(pv.read(model_path))
+        if not parts:
+            continue
+
+        combined = parts[0].copy(deep=True)
+        for part in parts[1:]:
+            combined = combined.merge(part)
+
+        bounds = combined.bounds
+        cx = 0.5 * (bounds[0] + bounds[1])
+        cy = 0.5 * (bounds[2] + bounds[3])
+        min_z = bounds[4]
+        normalized_height = max(bounds[5] - bounds[4], 1e-6)
+        scale = 0.30 / normalized_height
+
+        normalized_parts: list[tuple[pv.PolyData, tuple[float, float, float] | None]] = []
+        for part in parts:
+            transformed = part.copy(deep=True)
+            transformed.translate((-cx, -cy, -min_z), inplace=True)
+            transformed.scale(scale, inplace=True)
+            normalized_parts.append((transformed, _extract_base_color(part)))
+
+        model_meshes.append(normalized_parts)
+    return model_meshes
+
+
 def show_wildfire_result_3d(
     postprocess: dict[str, Any],
     *,
@@ -152,6 +191,7 @@ def show_wildfire_result_3d(
     tree_meshes = _load_tree_meshes(assets_path)
     if not tree_meshes:
         raise ValueError(f"No GLB tree models found in: {assets_path}")
+    dry_bush_meshes = _load_dry_bush_meshes(assets_path)
 
     seen: set[tuple[int, int]] = set()
     for idx, cell in enumerate(selected_cells):
@@ -181,6 +221,32 @@ def show_wildfire_result_3d(
                 add_kwargs["color"] = part_color
             plotter.add_mesh(tree, **add_kwargs)
 
+    # Render unselected high-fuel cells as dry bush models to show remaining fire risk.
+    if dry_bush_meshes:
+        dry_color = (0.60, 0.43, 0.22)
+        dry_cells = [
+            (r, c)
+            for r in range(rows)
+            for c in range(cols)
+            if float(fuel_map[r, c]) > 0.5 and (r, c) not in seen
+        ]
+        for idx, (r, c) in enumerate(dry_cells):
+            bush_parts = dry_bush_meshes[idx % len(dry_bush_meshes)]
+            rotation = float((idx * 29) % 360)
+            z_offset = 0.03 + 0.07 * float(np.clip(fuel_map[r, c], 0.0, 1.0))
+            for base_part, _part_color in bush_parts:
+                bush = base_part.copy(deep=True)
+                bush = bush.rotate_z(rotation, inplace=False)
+                bush = bush.translate((float(c), float(rows - 1 - r), z_offset), inplace=False)
+                plotter.add_mesh(
+                    bush,
+                    color=dry_color,
+                    smooth_shading=True,
+                    ambient=0.22,
+                    diffuse=0.72,
+                    specular=0.06,
+                )
+
     # Add subtle grid accents so each shrub marker sits on a visibly distinct tile.
     for r in range(rows + 1):
         y = float(r - 0.5)
@@ -190,7 +256,12 @@ def show_wildfire_result_3d(
         plotter.add_lines(np.array([[x, -0.5, 0.001], [x, rows - 0.5, 0.001]]), color="#2a2f39", width=1)
 
     plotter.add_title(title, font_size=14, color="white")
-    plotter.add_text("Forest-green risk tiles + upright tree markers", position="lower_left", font_size=10, color="white")
+    plotter.add_text(
+        "Forest-green risk tiles + tree markers (selected) + dry bush markers (unselected)",
+        position="lower_left",
+        font_size=10,
+        color="white",
+    )
     plotter.camera_position = [
         (float(cols) * 1.2, float(-rows) * 1.4, float(max(rows, cols)) * 1.5),
         (float(cols) * 0.5 - 0.5, float(rows) * 0.5 - 0.5, 0.0),

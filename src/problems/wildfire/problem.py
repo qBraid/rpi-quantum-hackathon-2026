@@ -71,13 +71,16 @@ class WildfireMitigationProblem(Problem):
         )
 
     def build_problem_data(self, *, logger: logging.Logger) -> WildfireProblemData:
-        return WildfireModel.build_problem_data(
+        problem_data = WildfireModel.build_problem_data(
             grid_size=(self.grid_rows, self.grid_cols),
             shrub_budget=self.shrub_budget,
             brush_probability=self.brush_probability,
             seed=self.seed,
             logger=logger,
         )
+        # Reuse the exact grid instance for ansatz construction so graph/ansatz topology stays aligned.
+        object.__setattr__(self, "_cached_grid", problem_data.grid)
+        return problem_data
 
     def build_ansatz(self, *, logger: logging.Logger) -> QuantumCircuit:
         logger.info(
@@ -86,12 +89,18 @@ class WildfireMitigationProblem(Problem):
         )
         gamma = ParameterVector("gamma", self.reps)
         beta = ParameterVector("beta", self.reps)
-        grid = build_random_grid(
-            grid_size=(self.grid_rows, self.grid_cols),
-            brush_probability=self.brush_probability,
-            shrub_budget=self.shrub_budget,
-            seed=self.seed,
-        )
+        grid = getattr(self, "_cached_grid", None)
+        if grid is None:
+            logger.warning(
+                "Problem data grid cache missing; rebuilding Grid from seed=%s for ansatz generation.",
+                self.seed,
+            )
+            grid = build_random_grid(
+                grid_size=(self.grid_rows, self.grid_cols),
+                brush_probability=self.brush_probability,
+                shrub_budget=self.shrub_budget,
+                seed=self.seed,
+            )
         qc = grid.BuildQuantumCircuit(list(gamma), list(beta))
         logger.info(
             "Circuit qubits=%s params=%s depth=%s seed=%s",
