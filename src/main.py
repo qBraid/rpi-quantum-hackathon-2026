@@ -334,11 +334,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     if should_plot_wildfire and (open_figures or open_plotters):
         while True:
             active_figures = [fig for fig in open_figures if plt.fignum_exists(fig.number)]
-            active_plotters = [
-                plotter
-                for plotter in open_plotters
-                if bool(getattr(getattr(plotter, "render_window", None), "GetMapped", lambda: 0)())
-            ]
+            active_plotters = [plotter for plotter in open_plotters if not getattr(plotter, "_closed", True)]
             if not active_figures and not active_plotters:
                 break
             for fig in active_figures:
@@ -360,6 +356,14 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
                 plotter.close()
             except Exception:
                 continue
+        try:
+            from matplotlib.backends import _macosx
+
+            stop = getattr(_macosx, "stop", None)
+            if callable(stop):
+                stop()
+        except Exception:
+            pass
 
 
     return {
