@@ -173,22 +173,6 @@ class _Dashboard:
         plt.ion()
         plt.pause(0.05)
 
-        # ── QPU hardware button ───────────────────────────────────────────────
-        self._ax_btn = self.fig.add_axes([0.35, 0.015, 0.30, 0.050])
-        self._btn_qpu = Button(
-            self._ax_btn, "▶  Run on QPU  (real hardware)",
-            color="#1a2035", hovercolor="#2d3a52",
-        )
-        self._btn_qpu.label.set_color("#e2e8f0")
-        self._btn_qpu.label.set_fontsize(9)
-        self._btn_qpu.label.set_fontweight("bold")
-        self._btn_qpu.on_clicked(self._on_qpu_click)
-
-        # Timer: drain QPU thread updates safely on the GUI thread every 200 ms
-        self._qpu_timer = self.fig.canvas.new_timer(interval=200)
-        self._qpu_timer.add_callback(self._poll_qpu_data)
-        self._qpu_timer.start()
-
     # ── public API ────────────────────────────────────────────────────────────
 
     def set_current_run(self, label: str) -> None:
@@ -325,12 +309,30 @@ class _Dashboard:
 
     def finalize(self) -> None:
         plt.ioff()
-        end_title = self._TITLE + "\n— benchmark complete —"
+        end_title = self._TITLE + "\n— benchmark complete —  (click button below to run on real QPU)"
         self.fig.suptitle(end_title, fontsize=10, fontweight="bold", color="#10b981")
         self._draw()
         out = Path(__file__).resolve().parent / "benchmark_result.png"
         self.fig.savefig(out, dpi=150, bbox_inches="tight", facecolor=self.fig.get_facecolor())
         print(f"\n[dashboard] saved → {out}")
+
+        # ── Show QPU button now that simulator runs are done ──────────────────
+        self._ax_btn = self.fig.add_axes([0.35, 0.015, 0.30, 0.050])
+        self._btn_qpu = Button(
+            self._ax_btn, "▶  Run on QPU  (real hardware)",
+            color="#1a2035", hovercolor="#2d3a52",
+        )
+        self._btn_qpu.label.set_color("#e2e8f0")
+        self._btn_qpu.label.set_fontsize(9)
+        self._btn_qpu.label.set_fontweight("bold")
+        self._btn_qpu.on_clicked(self._on_qpu_click)
+
+        # Timer: drain QPU thread updates safely on the GUI thread every 200 ms
+        self._qpu_timer = self.fig.canvas.new_timer(interval=200)
+        self._qpu_timer.add_callback(self._poll_qpu_data)
+        self._qpu_timer.start()
+
+        self.fig.canvas.draw_idle()
         plt.show(block=True)
 
     # ── internal draw ─────────────────────────────────────────────────────────
