@@ -1,4 +1,5 @@
 from qiskit import QuantumCircuit, QAOAAnsatz, PauliOp
+import random
 
 class Grid:
 
@@ -12,6 +13,14 @@ class Grid:
             self.idx[bush] = i # Map 2D grid coordinate -> 1D index
         self.edges = self.BuildEdges()
         pass
+
+    @classmethod
+    def random(cls, length: int, width: int, num_bushes: int, budget: int):
+        bushes = set()
+        while len(bushes) < num_bushes:
+            bush = (random.randint(0, length - 1), random.randint(0, width - 1))
+            bushes.add(bush)
+        return cls(length, width, list(bushes), budget)
 
     def BuildEdges(self) -> list[tuple[int, int]]:
         edges = []
