@@ -238,6 +238,7 @@ The best tradeoff is the combination with the highest observed `tradeoff_score` 
 
 - `--executor`: selects the executor implementation (`qiskit` or `qbraid`) for single-run mode
 - `--run-matrix`: run all selected executor/option combinations
+- `--headless`: disable all wildfire visualization windows (Matplotlib 2D + PyVista 3D)
 
 ### Problem parameters
 

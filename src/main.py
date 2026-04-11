@@ -1,7 +1,10 @@
 import argparse
+import time
 import sys
 from dataclasses import dataclass
 from typing import Any, TypeAlias
+
+import matplotlib.pyplot as plt
 
 from executors import Executor, QBraidExecutor, QiskitExecutor
 from optimizers import Optimizer, ScipyOptimizer, SpsaOptimizer
@@ -87,9 +90,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="qBraid environments to include in matrix mode.",
     )
     parser.add_argument(
-        "--no-wildfire-plot",
+        "--headless",
         action="store_true",
-        help="Disable matplotlib visualization for wildfire runs (all combinations/invocations).",
+        help="Disable all wildfire visualization windows (2D and 3D).",
     )
     parser.add_argument(
         "--optimizer-backend",
@@ -262,12 +265,16 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     benchmark_enabled = len(unique_topic_sets) == 1 and bool(benchmark_topics)
 
     show_wildfire_result = None
-    should_plot_wildfire = args.problem == "wildfire" and not args.no_wildfire_plot
+    show_wildfire_result_3d = None
+    should_plot_wildfire = args.problem == "wildfire" and not args.headless
     if should_plot_wildfire:
+        from utils.wildfire_3d_visualization import show_wildfire_result_3d
         from utils.wildfire_visualization import show_wildfire_result
 
+    open_figures: list[plt.Figure] = []
+    open_plotters: list[Any] = []
     all_results: list[dict[str, Any]] = []
-    for idx, run in enumerate(runs):
+    for run in runs:
         print(f"\n--- Running {run.executor.run_label} ---")
         result = run.executor.execute(problem, optimizer=optimizer)
         result["combination"] = run.name
@@ -276,11 +283,21 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
         if should_plot_wildfire and show_wildfire_result is not None:
             postprocess = result.get("postprocess")
             if isinstance(postprocess, dict):
-                show_wildfire_result(
+                fig = show_wildfire_result(
                     postprocess,
                     title=f"Wildfire Mitigation - {run.name}",
-                    block=(idx == len(runs) - 1),
+                    block=False,
                 )
+                if fig is not None:
+                    open_figures.append(fig)
+                if show_wildfire_result_3d is not None:
+                    plotter = show_wildfire_result_3d(
+                        postprocess,
+                        title=f"Wildfire Mitigation (3D) - {run.name}",
+                        block=False,
+                    )
+                    if plotter is not None:
+                        open_plotters.append(plotter)
 
     best_result = _select_best_result(all_results)
 
@@ -313,6 +330,36 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
         f"(run={best_result.get('run_label')}, {best_metric_name}={_format_metric_value(best_metric_value)})"
     )
     print("=" * 70)
+
+    if should_plot_wildfire and (open_figures or open_plotters):
+        while True:
+            active_figures = [fig for fig in open_figures if plt.fignum_exists(fig.number)]
+            active_plotters = [
+                plotter
+                for plotter in open_plotters
+                if bool(getattr(getattr(plotter, "render_window", None), "GetMapped", lambda: 0)())
+            ]
+            if not active_figures and not active_plotters:
+                break
+            for fig in active_figures:
+                try:
+                    fig.canvas.flush_events()
+                except Exception:
+                    continue
+            for plotter in active_plotters:
+                try:
+                    plotter.update()
+                    plotter.iren.process_events()
+                except Exception:
+                    continue
+            time.sleep(0.05)
+
+        plt.close("all")
+        for plotter in open_plotters:
+            try:
+                plotter.close()
+            except Exception:
+                continue
 
 
     return {

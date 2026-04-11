@@ -6,7 +6,12 @@ import numpy as np
 from problems.base import format_float
 
 
-def show_wildfire_result(postprocess: dict[str, Any], *, title: str, block: bool = True) -> None:
+def show_wildfire_result(
+    postprocess: dict[str, Any],
+    *,
+    title: str,
+    block: bool = True,
+) -> plt.Figure | None:
     """Render wildfire optimization output and display it in a matplotlib window."""
     risk_map = np.asarray(postprocess.get("risk_map", []), dtype=float)
     fuel_map = np.asarray(postprocess.get("fuel_map", []), dtype=float)
@@ -62,4 +67,6 @@ def show_wildfire_result(postprocess: dict[str, Any], *, title: str, block: bool
     if not block:
         # Ensure non-blocking windows are painted before the next long optimization step.
         plt.pause(0.001)
+        return fig
 
+    return None

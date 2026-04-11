@@ -27,7 +27,7 @@ def _resolve_assets_dir(assets_dir: str | Path | None) -> Path:
     )
 
 
-def _as_polydata(mesh: pv.DataSet) -> pv.PolyData:
+def _as_polydata(mesh: Any) -> pv.PolyData:
     if isinstance(mesh, pv.PolyData):
         return mesh
     if isinstance(mesh, pv.MultiBlock):
@@ -35,7 +35,7 @@ def _as_polydata(mesh: pv.DataSet) -> pv.PolyData:
     return mesh.extract_surface().triangulate()
 
 
-def _iter_polydata_blocks(dataset: pv.DataSet) -> list[pv.PolyData]:
+def _iter_polydata_blocks(dataset: Any) -> list[pv.PolyData]:
     if isinstance(dataset, pv.MultiBlock):
         blocks: list[pv.PolyData] = []
         for block in dataset:
@@ -81,11 +81,11 @@ def _load_tree_meshes(assets_dir: Path) -> list[list[tuple[pv.PolyData, tuple[fl
 
         rotated_parts: list[tuple[pv.PolyData, tuple[float, float, float] | None]] = []
         for part in parts:
-            transformed = part
+            transformed = part.copy(deep=True)
             if x_rot:
-                transformed = transformed.rotate_x(x_rot, inplace=False)
+                transformed.rotate_x(x_rot, inplace=True)
             if y_rot:
-                transformed = transformed.rotate_y(y_rot, inplace=False)
+                transformed.rotate_y(y_rot, inplace=True)
             rotated_parts.append((transformed, _extract_base_color(part)))
 
         rotated_combined = rotated_parts[0][0].copy(deep=True)
@@ -101,8 +101,9 @@ def _load_tree_meshes(assets_dir: Path) -> list[list[tuple[pv.PolyData, tuple[fl
 
         normalized_parts: list[tuple[pv.PolyData, tuple[float, float, float] | None]] = []
         for part_mesh, part_color in rotated_parts:
-            transformed = part_mesh.translate((-cx, -cy, -min_z), inplace=False)
-            transformed = transformed.scale(scale, inplace=False)
+            transformed = part_mesh.copy(deep=True)
+            transformed.translate((-cx, -cy, -min_z), inplace=True)
+            transformed.scale(scale, inplace=True)
             normalized_parts.append((transformed, part_color))
 
         model_meshes.append(normalized_parts)
@@ -116,7 +117,7 @@ def show_wildfire_result_3d(
     assets_dir: str | Path | None = None,
     block: bool = True,
     screenshot_path: str | Path | None = None,
-) -> None:
+) -> pv.Plotter | None:
     """Render an artistic 3D shrub-placement scene with model trees on selected tiles."""
     risk_map = np.asarray(postprocess.get("risk_map", []), dtype=float)
     fuel_map = np.asarray(postprocess.get("fuel_map", []), dtype=float)
@@ -131,7 +132,7 @@ def show_wildfire_result_3d(
     risk_span = max(risk_max - risk_min, 1e-9)
 
     cmap = plt.get_cmap("Greens")
-    plotter = pv.Plotter(window_size=(1400, 900), off_screen=bool(screenshot_path and not block))
+    plotter = pv.Plotter(window_size=[1400, 900], off_screen=bool(screenshot_path and not block))
     plotter.set_background("#1c1f26", top="#0f1115")
 
     for r in range(rows):
@@ -191,8 +192,8 @@ def show_wildfire_result_3d(
     plotter.add_title(title, font_size=14, color="white")
     plotter.add_text("Forest-green risk tiles + upright tree markers", position="lower_left", font_size=10, color="white")
     plotter.camera_position = [
-        (cols * 1.2, -rows * 1.4, max(rows, cols) * 1.5),
-        (cols * 0.5 - 0.5, rows * 0.5 - 0.5, 0.0),
+        (float(cols) * 1.2, float(-rows) * 1.4, float(max(rows, cols)) * 1.5),
+        (float(cols) * 0.5 - 0.5, float(rows) * 0.5 - 0.5, 0.0),
         (0.0, 0.0, 1.0),
     ]
 
@@ -202,9 +203,14 @@ def show_wildfire_result_3d(
         plotter.show(auto_close=False)
         plotter.screenshot(str(path))
         plotter.close()
-        return
+        return None
 
-    plotter.show(auto_close=not block)
+    if block:
+        plotter.show(auto_close=False)
+        return None
+
+    plotter.show(interactive=True, auto_close=False, interactive_update=True)
+    return plotter
 
 
 
