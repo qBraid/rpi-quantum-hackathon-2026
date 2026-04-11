@@ -8,7 +8,8 @@ from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.library import efficient_su2
 
 from problems.base import ParameterEvaluator, Problem
-from problems.maxcut_model import MaxCutModel, MaxCutProblemData
+
+from .model import MaxCutModel, MaxCutProblemData
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,9 @@ class MaxCutProblem(Problem):
             [op.apply_layout(layout) for op in problem_data.pce_y],
             [op.apply_layout(layout) for op in problem_data.pce_z],
         ]
+
+    def metric_candidates(self) -> tuple[str, ...]:
+        return ("cut_size",)
 
     def make_loss(
         self,

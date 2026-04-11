@@ -305,10 +305,29 @@ class QBraidExecutor(Executor):
         )
 
     @staticmethod
-    def _quality_score(cut_size: int | None, final_loss: float) -> float:
-        if cut_size is not None:
-            return float(cut_size)
+    def _quality_score(metric_value: float | None, final_loss: float) -> float:
+        if metric_value is not None:
+            return float(metric_value)
         return -float(final_loss)
+
+    @staticmethod
+    def _resolve_primary_metric_from_candidates(
+        postprocess: dict[str, Any], candidates: tuple[str, ...]
+    ) -> tuple[str, Any | None]:
+        metric_name = postprocess.get("primary_metric_name")
+        metric_value = postprocess.get("primary_metric_value")
+        if metric_name is not None and metric_value is not None:
+            return str(metric_name), metric_value
+
+        for candidate in candidates:
+            if candidate in postprocess:
+                return candidate, postprocess[candidate]
+
+        for key, value in postprocess.items():
+            if isinstance(value, (int, float)):
+                return key, value
+
+        return "primary_metric", None
 
     @staticmethod
     def _compile_with_qbraid_or_qiskit(
@@ -431,23 +450,34 @@ class QBraidExecutor(Executor):
         final_loss = (
             float(experiment_results[-1]["loss"]) if experiment_results else float("inf")
         )
+        primary_metric_name, primary_metric_value = self._resolve_primary_metric_from_candidates(
+            postprocess, problem.metric_candidates()
+        )
         raw_cut_size = postprocess.get("cut_size")
         cut_size = int(raw_cut_size) if isinstance(raw_cut_size, int) else None
-
-        quality_score = self._quality_score(cut_size=cut_size, final_loss=final_loss)
+        metric_value = (
+            float(primary_metric_value)
+            if isinstance(primary_metric_value, (int, float))
+            else float(cut_size)
+            if cut_size is not None
+            else None
+        )
+        quality_score = self._quality_score(metric_value=metric_value, final_loss=final_loss)
         compiled_resource_cost = self._calc_compiled_resource_cost(metrics)
         tradeoff_score = quality_score / max(compiled_resource_cost, 1e-9)
         logger.info(
-            "Run complete: cut_size=%s final_loss=%.6f cost=%.3f tradeoff=%.5f",
-            cut_size,
+            "Run complete: %s=%s final_loss=%.6f cost=%.3f tradeoff=%.5f",
+            primary_metric_name,
+            primary_metric_value,
             final_loss,
             compiled_resource_cost,
             tradeoff_score,
         )
 
         logger.info(
-            "Summary cut=%s loss=%.6f depth=%s twoq=%s cost=%.3f tradeoff=%.5f",
-            cut_size,
+            "Summary %s=%s loss=%.6f depth=%s twoq=%s cost=%.3f tradeoff=%.5f",
+            primary_metric_name,
+            primary_metric_value,
             final_loss,
             metrics.depth,
             metrics.two_qubit_ops,
@@ -463,6 +493,8 @@ class QBraidExecutor(Executor):
             "strategy": strategy.name,
             "environment": environment.name,
             "qbraid_shots": self.qbraid_shots if environment.name == "cloud" else None,
+            "primary_metric_name": primary_metric_name,
+            "primary_metric_value": primary_metric_value,
             "final_loss": final_loss,
             "cut_size": cut_size,
             "quality_score": quality_score,

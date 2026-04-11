@@ -147,6 +147,25 @@ class QiskitExecutor(Executor):
 
         return evaluate
 
+    @staticmethod
+    def _resolve_primary_metric_from_candidates(
+        postprocess: dict[str, Any], candidates: tuple[str, ...]
+    ) -> tuple[str, Any]:
+        metric_name = postprocess.get("primary_metric_name")
+        metric_value = postprocess.get("primary_metric_value")
+        if metric_name is not None and metric_value is not None:
+            return str(metric_name), metric_value
+
+        for candidate in candidates:
+            if candidate in postprocess:
+                return candidate, postprocess[candidate]
+
+        for key, value in postprocess.items():
+            if isinstance(value, (int, float)):
+                return key, value
+
+        return "primary_metric", None
+
     def execute(self, problem: Problem) -> dict[str, Any]:
         logger = self._logger()
         logger.info("Start mode=%s", self.mode)
@@ -228,8 +247,15 @@ class QiskitExecutor(Executor):
         postprocess = problem.postprocess(
             problem_data=problem_data, experiment_results=experiment_results
         )
-        cut_size = postprocess["cut_size"]
-        logger.info("Result cut=%s objective=%s", cut_size, result.fun)
+        primary_metric_name, primary_metric_value = self._resolve_primary_metric_from_candidates(
+            postprocess, problem.metric_candidates()
+        )
+        logger.info(
+            "Result %s=%s objective=%s",
+            primary_metric_name,
+            primary_metric_value,
+            result.fun,
+        )
 
         average_iteration_time = float(np.mean(iteration_times)) if iteration_times else 0.0
         min_iteration_time = float(np.min(iteration_times)) if iteration_times else 0.0
@@ -256,7 +282,9 @@ class QiskitExecutor(Executor):
             "problem_setup_time": problem_data.setup_time,
             "circuit_time": circuit_time,
             "optimization_time": optimization_time,
-            "cut_size": cut_size,
+            "primary_metric_name": primary_metric_name,
+            "primary_metric_value": primary_metric_value,
+            "cut_size": postprocess.get("cut_size"),
             "optimization_result": result,
             "postprocess": postprocess,
             "experiment_results": experiment_results,

@@ -38,6 +38,10 @@ class Problem(CliArgumentProvider, ABC):
         """Apply a transpiled layout to the problem observables."""
 
     @abstractmethod
+    def metric_candidates(self) -> tuple[str, ...]:
+        """Return ordered postprocess keys that identify the problem's primary metric."""
+
+    @abstractmethod
     def make_loss(
         self,
         *,

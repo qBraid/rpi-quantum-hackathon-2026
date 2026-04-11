@@ -3,13 +3,14 @@ from dataclasses import dataclass
 from typing import Any, TypeAlias
 
 from executors import Executor, QBraidExecutor, QiskitExecutor
-from problems import MaxCutProblem, Problem
+from problems import MaxCutProblem, Problem, WildfireMitigationProblem
 
 ProblemType: TypeAlias = type[Problem]
 ExecutorType: TypeAlias = type[Executor]
 
 PROBLEMS: dict[str, ProblemType] = {
     "maxcut": MaxCutProblem,
+    "wildfire": WildfireMitigationProblem,
 }
 
 EXECUTORS: dict[str, ExecutorType] = {
@@ -24,7 +25,7 @@ class ExecutorRun:
     executor: Executor
 
 
-def build_parser(problem_cls: ProblemType = MaxCutProblem) -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Run benchmark workloads and compare executor combinations when "
@@ -77,7 +78,8 @@ def build_parser(problem_cls: ProblemType = MaxCutProblem) -> argparse.ArgumentP
         help="qBraid environments to include in matrix mode.",
     )
 
-    problem_cls.add_cli_arguments(parser)
+    for problem_cls in PROBLEMS.values():
+        problem_cls.add_cli_arguments(parser)
     QiskitExecutor.add_cli_arguments(parser)
     QBraidExecutor.add_cli_arguments(parser)
     return parser

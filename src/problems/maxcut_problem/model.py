@@ -96,4 +96,3 @@ class MaxCutModel:
                 partition1.add(node_id)
         return partition0, partition1
 
-

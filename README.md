@@ -1,9 +1,9 @@
-# Quantum Hackathon MaxCut Benchmark
+# Quantum Hackathon Benchmark Suite
 
-This project benchmarks a MaxCut-style optimization workflow with a dependency-injected structure:
+This project benchmarks two optimization workflows with a dependency-injected structure:
 
-- `src/problems/maxcut.py` contains the Max-Cut problem implementation
-- `src/problems/maxcut_model.py` contains extracted Max-Cut domain/model logic
+- `src/problems/maxcut_problem/` contains the relocated Max-Cut problem implementation
+- `src/problems/wildfire/` contains the wildfire mitigation problem based on the layer-optimized circuit layout
 - `src/executors/qiskit_executor.py` contains the Qiskit runtime executor
 - `src/executors/qbraid_executor.py` contains the qBraid-focused executor (including qBraid cloud mode via `QbraidProvider`)
 - `src/main.py` owns matrix orchestration and cross-combination benchmark comparison logic
@@ -95,6 +95,7 @@ uv run python src/main.py --executor qiskit --mode aer --backend ibm_rensselaer 
 uv run python src/main.py --executor qbraid --qbraid-strategy balanced --qbraid-environment hardware --backend ibm_rensselaer --num-nodes 60
 uv run python src/main.py --executor qbraid --qbraid-strategy aggressive --qbraid-environment aer --num-nodes 60
 uv run python src/main.py --executor qbraid --qbraid-environment cloud --qbraid-strategy balanced --backend <qbraid_device_id> --qbraid-shots 2048 --num-nodes 60
+uv run python src/main.py --problem wildfire --executor qiskit --mode clifford --grid-rows 10 --grid-cols 10 --shrub-budget 10
 ```
 
 Minimal qBraid cloud example:
@@ -135,17 +136,29 @@ Note: mixed matrices still run and list all combinations. Topic-based benchmark 
 ## Options
 
 - Global options
-  - `--problem`: selects the problem implementation (`maxcut`)
+  - `--problem`: selects the problem implementation (`maxcut`, `wildfire`)
   - `--executor`: selects the executor implementation (`qiskit` or `qbraid`) for single-run mode
   - `--run-matrix`: run all selected executor/option combinations
   - `--benchmark-executors`: executors included in matrix mode
 
 - Problem options
+  - MaxCut: `--num-nodes`, `--num-qubits`, `--graph-probability`, `--seed`, `--reps`
+  - Wildfire: `--grid-rows`, `--grid-cols`, `--shrub-budget`, `--brush-probability`, `--wildfire-seed`, `--layer-reps`
+
+- MaxCut options
   - `--num-nodes`: graph size
   - `--num-qubits`: ansatz width
   - `--graph-probability`: random graph edge probability
   - `--seed`: random seed
   - `--reps`: ansatz repetitions
+
+- Wildfire options
+  - `--grid-rows`: grid row count
+  - `--grid-cols`: grid column count
+  - `--shrub-budget`: Toyon shrub budget
+  - `--brush-probability`: chance that a cell starts as dry brush
+  - `--wildfire-seed`: random seed for landscape generation
+  - `--layer-reps`: layer-optimized circuit repetitions
 
 - Qiskit executor options
   - `--mode`: execution backend (`hardware`, `aer`, `clifford`)
