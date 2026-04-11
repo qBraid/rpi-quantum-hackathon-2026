@@ -1,4 +1,5 @@
 import argparse
+import sys
 from dataclasses import dataclass
 from typing import Any, TypeAlias
 
@@ -88,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-wildfire-plot",
         action="store_true",
-        help="Disable matplotlib visualization for wildfire runs.",
+        help="Disable matplotlib visualization for wildfire runs (all combinations/invocations).",
     )
     parser.add_argument(
         "--optimizer-backend",
@@ -113,7 +114,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    return build_parser().parse_args(argv)
+    normalized_argv = list(sys.argv[1:] if argv is None else argv)
+    has_problem_flag = any(
+        token == "--problem" or token.startswith("--problem=") for token in normalized_argv
+    )
+    has_wildfire_hint = any(
+        token in {
+            "--grid-rows",
+            "--grid-cols",
+            "--shrub-budget",
+            "--brush-probability",
+            "--wildfire-seed",
+            "--layer-reps",
+        }
+        for token in normalized_argv
+    )
+
+    if not has_problem_flag and has_wildfire_hint:
+        normalized_argv = ["--problem", "wildfire", *normalized_argv]
+
+    return build_parser().parse_args(normalized_argv)
 
 
 def _build_optimizer(args: argparse.Namespace) -> Optimizer:
@@ -241,12 +261,26 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     benchmark_topics = set(topic_sets[0]) if topic_sets else set()
     benchmark_enabled = len(unique_topic_sets) == 1 and bool(benchmark_topics)
 
+    show_wildfire_result = None
+    should_plot_wildfire = args.problem == "wildfire" and not args.no_wildfire_plot
+    if should_plot_wildfire:
+        from utils.wildfire_visualization import show_wildfire_result
+
     all_results: list[dict[str, Any]] = []
-    for run in runs:
+    for idx, run in enumerate(runs):
         print(f"\n--- Running {run.executor.run_label} ---")
         result = run.executor.execute(problem, optimizer=optimizer)
         result["combination"] = run.name
         all_results.append(result)
+
+        if should_plot_wildfire and show_wildfire_result is not None:
+            postprocess = result.get("postprocess")
+            if isinstance(postprocess, dict):
+                show_wildfire_result(
+                    postprocess,
+                    title=f"Wildfire Mitigation - {run.name}",
+                    block=(idx == len(runs) - 1),
+                )
 
     best_result = _select_best_result(all_results)
 
@@ -280,16 +314,6 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
     )
     print("=" * 70)
 
-    if args.problem == "wildfire" and not args.no_wildfire_plot:
-        from utils.wildfire_visualization import show_wildfire_result
-
-        postprocess = best_result.get("postprocess")
-        if isinstance(postprocess, dict):
-            show_wildfire_result(
-                postprocess,
-                title="Wildfire Mitigation Result",
-                block=True,
-            )
 
     return {
         "problem": args.problem,

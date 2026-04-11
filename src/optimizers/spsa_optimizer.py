@@ -21,7 +21,7 @@ class SpsaOptimizer(Optimizer):
             "--spsa-maxiter",
             type=int,
             default=20,
-            help="Maximum SPSA iterations.",
+            help="Maximum SPSA objective-evaluation budget.",
         )
         parser.add_argument(
             "--spsa-learning-rate",
@@ -79,17 +79,21 @@ class SpsaOptimizer(Optimizer):
 
     def planned_evaluations(self, *, num_parameters: int) -> int | None:
         _ = num_parameters
-        return max(1, 2 * self.maxiter)
+        return max(1, self.maxiter)
 
     def optimize(self, objective: ObjectiveFn, initial_params: np.ndarray) -> OptimizerResult:
         x = np.asarray(initial_params, dtype=float).copy()
         rng = np.random.default_rng(self.seed)
+        budget = max(1, self.maxiter)
 
         best_x = x.copy()
         best_fun = float("inf")
         history: list[float] = []
+        nfev = 0
+        nit = 0
 
-        for k in range(self.maxiter):
+        while nfev + 2 <= budget:
+            k = nit
             ak = self.learning_rate / ((k + 1) ** self.alpha)
             ck = self.perturbation / ((k + 1) ** self.gamma)
             delta = rng.choice(np.array([-1.0, 1.0], dtype=float), size=x.shape)
@@ -100,6 +104,7 @@ class SpsaOptimizer(Optimizer):
             y_plus = float(objective(x_plus))
             y_minus = float(objective(x_minus))
             history.extend([y_plus, y_minus])
+            nfev += 2
 
             ghat = (y_plus - y_minus) / (2.0 * ck) * (1.0 / delta)
             x = x - ak * ghat
@@ -108,11 +113,21 @@ class SpsaOptimizer(Optimizer):
             if y_center < best_fun:
                 best_fun = y_center
                 best_x = x.copy()
+            nit += 1
+
+        if nfev < budget:
+            # Use any leftover single evaluation without exceeding the hard budget.
+            y_current = float(objective(x))
+            history.append(y_current)
+            nfev += 1
+            if y_current < best_fun:
+                best_fun = y_current
+                best_x = x.copy()
 
         raw_result = {
             "method": "SPSA",
-            "nit": self.maxiter,
-            "nfev": 2 * self.maxiter,
+            "nit": nit,
+            "nfev": nfev,
             "history": history,
             "options": self.options,
         }

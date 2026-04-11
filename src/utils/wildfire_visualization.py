@@ -45,4 +45,7 @@ def show_wildfire_result(postprocess: dict[str, Any], *, title: str, block: bool
     fig.suptitle(f"{title} | fire_break_score={fire_break_str}")
     fig.tight_layout()
     plt.show(block=block)
+    if not block:
+        # Ensure non-blocking windows are painted before the next long optimization step.
+        plt.pause(0.001)
 
