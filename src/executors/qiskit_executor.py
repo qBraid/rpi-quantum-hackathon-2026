@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from time import time
-from typing import Any, Callable, Self
+from typing import Any, Callable, Self, cast
 
 import numpy as np
 from dotenv import load_dotenv
@@ -52,6 +52,15 @@ class QiskitExecutor(Executor):
     @classmethod
     def from_namespace(cls, args) -> Self:
         return cls(mode=args.mode, backend_name=args.backend, maxiter=args.maxiter)
+
+    @property
+    def run_label(self) -> str:
+        return f"qiskit(mode={self.mode}, backend={self.backend_name})"
+
+    @property
+    def benchmark_topics(self) -> set[str]:
+        # Legacy executor path does not provide normalized benchmark metrics.
+        return set()
 
     @staticmethod
     def _snap_to_clifford_angles(params: np.ndarray) -> np.ndarray:
@@ -164,25 +173,28 @@ class QiskitExecutor(Executor):
 
         seed = getattr(problem_data, "seed", 42)
         rng = np.random.default_rng(seed)
-        initial_params = rng.random(qc_optimized.num_parameters)
+        num_parameters = int(qc_optimized.num_parameters)
+        initial_params = rng.random(num_parameters)
 
-        cobyla_miniter = qc_optimized.num_parameters + 2
+        cobyla_miniter = num_parameters + 2
         cobyla_maxiter = max(self.maxiter, cobyla_miniter)
         if cobyla_maxiter != self.maxiter:
             print(
                 f"Requested COBYLA maxiter={self.maxiter} is below the solver minimum "
-                f"for {qc_optimized.num_parameters} parameters; using {cobyla_maxiter} instead."
+                f"for {num_parameters} parameters; using {cobyla_maxiter} instead."
             )
 
         print(f"Starting optimization on {runtime.label}...")
         start_optimization = time()
-        minimize_options: dict[str, int] = {"maxiter": cobyla_maxiter}
-        result = minimize(
-            loss_func,
-            initial_params,
+        objective: Callable[..., Any] = loss_func
+        minimize_fn: Callable[..., Any] = cast(Any, minimize)
+        # noinspection PyTypeChecker
+        result = minimize_fn(
+            fun=cast(Any, objective),
+            x0=cast(Any, initial_params),
             method="COBYLA",
-            options=minimize_options,
-        )  # type: ignore[arg-type, call-overload]
+            options={"maxiter": cobyla_maxiter},
+        )
         optimization_time = time() - start_optimization
         print(f"\n✓ Optimization completed in {optimization_time:.4f}s\n")
 
@@ -213,6 +225,9 @@ class QiskitExecutor(Executor):
         print("=" * 70)
 
         return {
+            "executor": "qiskit",
+            "run_label": self.run_label,
+            "benchmark_topics": sorted(self.benchmark_topics),
             "runtime_label": runtime.label,
             "setup_time": setup_time,
             "problem_setup_time": problem_data.setup_time,
